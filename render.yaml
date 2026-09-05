@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: internal-ops-hub-api
+    runtime: image
+    image:
+      url: # will be set after first deploy from Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: internal-ops-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PORT
+        sync: false
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+      - key: MINIO_BUCKET
+        sync: false
+      - key: MINIO_USE_SSL
+        sync: false
+      - key: AWS_REGION
+        sync: false
+    healthCheckPath: /auth/token
+    port: 3000
+    autoDeploy: true
+
+databases:
+  - name: internal-ops-db
+    plan: free
+    databaseName: eurisko_ops

@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Platform roles ────────────────────────────────────────────────
+enum PlatformRole {
+  EMPLOYEE
+  SYSTEM_ADMIN
+}
+
+// ─── Department membership roles ───────────────────────────────────
+enum DepartmentRole {
+  AGENT
+  MANAGER
+}
+
+// ─── Request priority ──────────────────────────────────────────────
+enum Priority {
+  LOW
+  STANDARD
+  URGENT
+}
+
+// ─── Request status (state machine) ────────────────────────────────
+enum RequestStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+// ─── Notification event status ─────────────────────────────────────
+enum EventStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ─── Users (SSO-backed) ───────────────────────────────────────────
+model User {
+  id           String       @id @default(uuid())
+  ssoSubject   String       @unique
+  displayName  String
+  email        String       @unique
+  platformRole PlatformRole @default(EMPLOYEE)
+  active       Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  memberships     DepartmentMember[]
+  ownedRequests   Request[]           @relation("RequestEmployee")
+  claimedRequests Request[]           @relation("RequestClaimant")
+  uploadedDocs    Document[]
+  auditActions    AuditLog[]
+
+  @@index([ssoSubject])
+  @@index([email])
+}
+
+// ─── Departments ──────────────────────────────────────────────────
+model Department {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members      DepartmentMember[]
+  requestTypes RequestType[]
+  requests     Request[]
+
+  @@index([code])
+}
+
+// ─── Department membership (agent / manager) ──────────────────────
+model DepartmentMember {
+  id             String         @id @default(uuid())
+  departmentId   String
+  userId         String
+  departmentRole DepartmentRole @default(AGENT)
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([userId, active])
+  @@index([departmentId, active])
+}
+
+// ─── Request types (catalog entries) ──────────────────────────────
+model RequestType {
+  id              String   @id @default(uuid())
+  departmentId    String
+  code            String
+  name            String
+  description     String?
+  active          Boolean  @default(true)
+  defaultPriority Priority @default(STANDARD)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  requests   Request[]
+
+  @@unique([departmentId, code])
+  @@index([departmentId, active])
+}
+
+// ─── Requests ─────────────────────────────────────────────────────
+model Request {
+  id              String        @id @default(uuid())
+  employeeId      String
+  departmentId    String
+  requestTypeId   String
+  title           String
+  description     String        @default("")
+  priority        Priority      @default(STANDARD)
+  status          RequestStatus @default(PENDING)
+  claimedBy       String?
+  resolutionNote  String?
+  rejectionReason String?
+  completedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  employee    User          @relation("RequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  department  Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  requestType RequestType   @relation(fields: [requestTypeId], references: [id], onDelete: Cascade)
+  claimant    User?         @relation("RequestClaimant", fields: [claimedBy], references: [id], onDelete: SetNull)
+  documents   Document[]
+  auditLogs   AuditLog[]
+  events      NotificationEvent[]
+
+  @@index([employeeId, createdAt(sort: Desc)])
+  @@index([departmentId, status, priority, createdAt])
+  @@index([status])
+}
+
+// ─── Documents (metadata — payload in object storage) ─────────────
+model Document {
+  id               String    @id @default(uuid())
+  requestId        String
+  storageKey       String    @unique
+  originalFilename String
+  mimeType         String
+  byteSize         Int
+  checksum         String
+  uploadedBy       String
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  purgeAt          DateTime?
+
+  request  Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  uploader User    @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([purgeAt, deletedAt])
+  @@index([storageKey])
+}
+
+// ─── Audit logs (append-only) ─────────────────────────────────────
+model AuditLog {
+  id        String   @id @default(uuid())
+  requestId String?
+  actorId   String
+  action    String
+  oldValue  String?
+  newValue  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  request Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor   User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@index([actorId])
+  @@index([action])
+}
+
+// ─── Notification events (outbox pattern) ─────────────────────────
+model NotificationEvent {
+  id        String      @id @default(uuid())
+  requestId String
+  eventType String
+  payload   Json
+  status    EventStatus @default(PENDING)
+  createdAt DateTime    @default(now())
+  sentAt    DateTime?
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([requestId])
+}

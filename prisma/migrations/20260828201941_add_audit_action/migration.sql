@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "AuditLog" ADD COLUMN     "action" TEXT NOT NULL DEFAULT 'STATE_TRANSITION';
