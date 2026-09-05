@@ -19,7 +19,6 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/prisma/seed.ts ./prisma/seed.ts
 COPY --from=builder /app/start.js ./start.js
 
 EXPOSE 3000
