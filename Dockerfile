@@ -5,7 +5,7 @@ COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 COPY prisma.config.ts ./
 RUN npm install --legacy-peer-deps
-ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+RUN echo 'DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"' > .env
 RUN npx prisma generate
 COPY . .
 RUN npx nest build
