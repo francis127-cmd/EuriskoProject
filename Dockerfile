@@ -20,6 +20,8 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma/seed.ts ./prisma/seed.ts
+COPY --from=builder /app/start.sh ./start.sh
+RUN chmod +x ./start.sh
 
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/src/main.js"]
+CMD ["./start.sh"]
