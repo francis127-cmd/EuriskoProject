@@ -1,51 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AuthUser } from '../auth/auth.service';
-import { Prisma, DepartmentRole, PlatformRole } from '@prisma/client';
+import { DepartmentRole, PlatformRole } from '@prisma/client';
 
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
-
-  async inviteUser(
-    dto: { email: string; displayName: string; departmentCode?: string; departmentRole?: string },
-    admin: AuthUser,
-  ) {
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existing) throw new ConflictException('User with this email already exists');
-
-    const user = await this.prisma.user.create({
-      data: {
-        companyId: admin.companyId,
-        ssoSubject: dto.email,
-        email: dto.email,
-        displayName: dto.displayName,
-        platformRole: PlatformRole.EMPLOYEE,
-      },
-    });
-
-    if (dto.departmentCode) {
-      const dept = await this.prisma.department.findUnique({
-        where: { companyId_code: { companyId: admin.companyId, code: dto.departmentCode } },
-      });
-      if (!dept) throw new NotFoundException(`Department ${dto.departmentCode} not found`);
-
-      await this.prisma.departmentMember.create({
-        data: {
-          departmentId: dept.id,
-          userId: user.id,
-          departmentRole: (dto.departmentRole as DepartmentRole) || DepartmentRole.AGENT,
-        },
-      });
-    }
-
-    return {
-      id: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      message: `Invite sent to ${user.email}. They can now sign in with Google.`,
-    };
-  }
 
   async listUsers(admin: AuthUser) {
     return this.prisma.user.findMany({

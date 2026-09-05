@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { JwtGuard } from '../auth/jwt.guard';
 import { AdminGuard } from './admin.guard';
 import { AdminService } from './admin.service';
@@ -9,11 +9,6 @@ import { CurrentUser } from '../auth/current-user.decorator';
 @UseGuards(JwtGuard, AdminGuard)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
-
-  @Post('invite')
-  invite(@Body() dto: { email: string; displayName: string; departmentCode?: string; departmentRole?: string }, @CurrentUser() user: AuthUser) {
-    return this.adminService.inviteUser(dto, user);
-  }
 
   @Get('users')
   listUsers(@CurrentUser() user: AuthUser) {

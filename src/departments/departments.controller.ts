@@ -18,15 +18,15 @@ export class DepartmentsController {
     return this.departmentsService.listActive(user.companyId);
   }
 
-  @Get(':code')
-  @ApiOperation({ summary: 'Get a department by code' })
-  get(@Param('code') code: string, @CurrentUser() user: AuthUser) {
-    return this.departmentsService.getDepartment(user.companyId, code);
-  }
-
   @Get('me/memberships')
   @ApiOperation({ summary: 'Get current user department memberships' })
   myMemberships(@CurrentUser() user: AuthUser) {
     return this.departmentsService.getMemberships(user.sub);
+  }
+
+  @Get(':code')
+  @ApiOperation({ summary: 'Get a department by code' })
+  get(@Param('code') code: string, @CurrentUser() user: AuthUser) {
+    return this.departmentsService.getDepartment(user.companyId, code);
   }
 }

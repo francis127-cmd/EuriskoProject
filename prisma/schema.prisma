@@ -45,9 +45,9 @@ enum EventStatus {
 model User {
   id           String       @id @default(uuid())
   companyId    String
-  ssoSubject   String       @unique
+  ssoSubject   String
   displayName  String
-  email        String       @unique
+  email        String
   platformRole PlatformRole @default(EMPLOYEE)
   active       Boolean      @default(true)
   createdAt    DateTime     @default(now())
@@ -60,8 +60,8 @@ model User {
   uploadedDocs  Document[]
   auditActions  AuditLog[]
 
-  @@index([companyId, ssoSubject])
-  @@index([companyId, email])
+  @@unique([companyId, ssoSubject])
+  @@unique([companyId, email])
   @@index([companyId])
 }
 

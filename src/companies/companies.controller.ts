@@ -25,6 +25,9 @@ class RegisterCompanyDto {
 export class CompaniesController {
   constructor(private readonly companiesService: CompaniesService) {}
 
+  // NOTE: Intentionally unauthenticated — this is the entry point for new companies.
+  // The first admin needs to register without an existing account.
+  // In production, restrict by IP whitelist or add CAPTCHA/rate-limiting.
   @Post('register')
   @ApiOperation({ summary: 'Register a new company and provision its default departments and admin' })
   @ApiResponse({ status: 201, description: 'Company and admin created successfully.' })
