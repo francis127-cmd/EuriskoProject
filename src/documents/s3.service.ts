@@ -1,16 +1,29 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+
+const LOCAL_DIR = join(process.cwd(), 'uploads');
 
 @Injectable()
 export class S3Service implements OnModuleInit {
   private client: S3Client;
   private bucket: string;
+  private useLocal = false;
   private readonly logger = new Logger(S3Service.name);
 
   onModuleInit() {
+    const endpoint = process.env.MINIO_ENDPOINT;
+    if (!endpoint) {
+      this.useLocal = true;
+      if (!existsSync(LOCAL_DIR)) mkdirSync(LOCAL_DIR, { recursive: true });
+      this.logger.log('Using local file storage (no S3 configured)');
+      return;
+    }
+
     this.bucket = process.env.MINIO_BUCKET || 'hr-documents';
     this.client = new S3Client({
-      endpoint: `http://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000}`,
+      endpoint: `http://${endpoint}:${process.env.MINIO_PORT || 9000}`,
       forcePathStyle: true,
       credentials: {
         accessKeyId: process.env.MINIO_ACCESS_KEY || 'minioadmin',
@@ -22,6 +35,11 @@ export class S3Service implements OnModuleInit {
   }
 
   async upload(key: string, buffer: Buffer, contentType: string): Promise<void> {
+    if (this.useLocal) {
+      writeFileSync(join(LOCAL_DIR, key), buffer);
+      this.logger.debug(`Uploaded locally: ${key} (${buffer.byteLength} bytes)`);
+      return;
+    }
     await this.client.send(new PutObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -32,6 +50,11 @@ export class S3Service implements OnModuleInit {
   }
 
   async download(key: string): Promise<{ body: Buffer; contentType: string }> {
+    if (this.useLocal) {
+      const filePath = join(LOCAL_DIR, key);
+      if (!existsSync(filePath)) throw new Error('File not found');
+      return { body: readFileSync(filePath), contentType: 'application/octet-stream' };
+    }
     const res = await this.client.send(new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -46,6 +69,12 @@ export class S3Service implements OnModuleInit {
   }
 
   async delete(key: string): Promise<void> {
+    if (this.useLocal) {
+      const filePath = join(LOCAL_DIR, key);
+      if (existsSync(filePath)) unlinkSync(filePath);
+      this.logger.debug(`Deleted locally: ${key}`);
+      return;
+    }
     await this.client.send(new DeleteObjectCommand({
       Bucket: this.bucket,
       Key: key,
