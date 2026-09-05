@@ -37,8 +37,13 @@ export class DocumentsService {
     file: { buffer: Buffer; originalname: string; mimetype?: string },
     user: AuthUser,
   ) {
-    const request = await this.prisma.request.findUnique({ where: { id: requestId } });
-    if (!request) throw new NotFoundException('Request not found');
+    const request = await this.prisma.request.findUnique({
+      where: { id: requestId },
+      include: { department: { select: { companyId: true } } },
+    });
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
 
     // Must be claimed before documents can be uploaded
     if (!request.claimedBy) {
@@ -114,8 +119,13 @@ export class DocumentsService {
   }
 
   async download(requestId: string, user: AuthUser) {
-    const request = await this.prisma.request.findUnique({ where: { id: requestId } });
-    if (!request) throw new NotFoundException('Request not found');
+    const request = await this.prisma.request.findUnique({
+      where: { id: requestId },
+      include: { department: { select: { companyId: true } } },
+    });
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
 
     // Authorization: employee can download own, dept members can download dept, admin all
     if (user.platformRole !== 'SYSTEM_ADMIN') {
@@ -140,8 +150,13 @@ export class DocumentsService {
   }
 
   async remove(requestId: string, user: AuthUser) {
-    const request = await this.prisma.request.findUnique({ where: { id: requestId } });
-    if (!request) throw new NotFoundException('Request not found');
+    const request = await this.prisma.request.findUnique({
+      where: { id: requestId },
+      include: { department: { select: { companyId: true } } },
+    });
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
 
     if (user.platformRole !== 'SYSTEM_ADMIN') {
       await this.departments.assertMemberOf(user, request.departmentId);

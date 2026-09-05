@@ -50,17 +50,62 @@ export class AuthService {
     });
 
     const payload = ticket.getPayload();
-    if (!payload || !payload.email) {
+    if (!payload || !payload.email || !payload.sub) {
       throw new UnauthorizedException('Invalid Google token');
     }
 
-    const user = await this.prisma.user.findUnique({
+    let user = await this.prisma.user.findUnique({
       where: { email: payload.email },
       select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
     });
 
-    if (!user || !user.active) {
-      throw new UnauthorizedException(`No account found for ${payload.email}. Contact your administrator.`);
+    if (!user) {
+      const invite = await this.prisma.invitation.findFirst({
+        where: { email: payload.email, expiresAt: { gt: new Date() } }
+      });
+
+      if (!invite) {
+        throw new UnauthorizedException(`No account or pending invitation found for ${payload.email}. Contact your administrator.`);
+      }
+
+      const newUser = await this.prisma.user.create({
+        data: {
+          companyId: invite.companyId,
+          email: invite.email,
+          ssoSubject: payload.sub,
+          displayName: payload.name || invite.email.split('@')[0],
+          platformRole: invite.platformRole,
+        },
+        select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true }
+      });
+
+      if (invite.departmentCode && invite.departmentRole) {
+        const dept = await this.prisma.department.findUnique({
+          where: { companyId_code: { companyId: invite.companyId, code: invite.departmentCode } }
+        });
+        if (dept) {
+          await this.prisma.departmentMember.create({
+            data: {
+              departmentId: dept.id,
+              userId: newUser.id,
+              departmentRole: invite.departmentRole
+            }
+          });
+        }
+      }
+
+      await this.prisma.invitation.delete({ where: { id: invite.id } });
+      user = newUser;
+    } else {
+      // If user existed with placeholder ssoSubject (e.g. from admin pre-provisioning), update with Google sub
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { ssoSubject: payload.sub },
+      });
+    }
+
+    if (!user.active) {
+      throw new UnauthorizedException('Account is inactive');
     }
 
     return {

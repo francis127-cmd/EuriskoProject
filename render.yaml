@@ -25,7 +25,7 @@ services:
         sync: false
       - key: AWS_REGION
         sync: false
-    healthCheckPath: /auth/token
+    healthCheckPath: /health
     port: 3000
     autoDeploy: true
 

@@ -1,10 +1,8 @@
-import { PrismaClient, PlatformRole, DepartmentRole, Priority } from '@prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma.service';
+import { PlatformRole, Priority } from '@prisma/client';
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
-const prisma = new PrismaClient({ adapter });
-
-const departments = [
+export const DEFAULT_DEPARTMENTS = [
   {
     code: 'HR',
     name: 'Human Resources',
@@ -66,90 +64,102 @@ const departments = [
   },
 ];
 
-const demoUsers = [
-  { ssoSubject: 'yorgo.cnam', displayName: 'Yorgo Cnam', email: 'yorgo.cnam@company.com', platformRole: PlatformRole.EMPLOYEE },
-  { ssoSubject: 'francis.king', displayName: 'Francis the King', email: 'francis.king@company.com', platformRole: PlatformRole.SYSTEM_ADMIN },
-  { ssoSubject: 'mike.howard', displayName: 'Mike Howard', email: 'mike.howard@company.com', platformRole: PlatformRole.EMPLOYEE },
-  { ssoSubject: 'james.wilson', displayName: 'James Wilson', email: 'james.wilson@company.com', platformRole: PlatformRole.EMPLOYEE },
-];
+@Injectable()
+export class CompaniesService {
+  constructor(private readonly prisma: PrismaService) {}
 
-async function main() {
-  console.log('Checking database seed state...');
+  async registerCompany(dto: {
+    name: string;
+    slug: string;
+    adminEmail: string;
+    adminName: string;
+  }) {
+    const slug = dto.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+    const adminEmail = dto.adminEmail.toLowerCase().trim();
 
-  const existingCompany = await prisma.company.findFirst({
-    where: { slug: 'acme' },
-  });
+    if (!slug) throw new BadRequestException('Invalid slug');
+    if (!adminEmail) throw new BadRequestException('Invalid admin email');
 
-  if (existingCompany) {
-    console.log('Seed company (Acme Corp) already exists. Skipping destructive wipe.');
-    return;
-  }
+    const existingSlug = await this.prisma.company.findUnique({ where: { slug } });
+    if (existingSlug) {
+      throw new ConflictException(`Company with slug '${slug}' already exists`);
+    }
 
-  console.log('Seeding initial demo company...');
+    const existingUser = await this.prisma.user.findUnique({ where: { email: adminEmail } });
+    if (existingUser) {
+      throw new ConflictException(`User with email '${adminEmail}' is already registered with another company`);
+    }
 
-  // Create demo company
-  const company = await prisma.company.create({
-    data: { name: 'Acme Corp', slug: 'acme' },
-  });
-  console.log(`  Company: ${company.name} (${company.id})`);
-
-  // Create departments and request types
-  for (const dept of departments) {
-    const created = await prisma.department.create({
-      data: {
-        companyId: company.id,
-        code: dept.code,
-        name: dept.name,
-        description: dept.description,
-        requestTypes: {
-          create: dept.requestTypes.map((rt) => ({
-            code: rt.code,
-            name: rt.name,
-            description: rt.description,
-            defaultPriority: rt.defaultPriority,
-          })),
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create Company
+      const company = await tx.company.create({
+        data: {
+          name: dto.name.trim(),
+          slug,
         },
-      },
+      });
+
+      // 2. Create Default Departments and Request Types
+      for (const dept of DEFAULT_DEPARTMENTS) {
+        await tx.department.create({
+          data: {
+            companyId: company.id,
+            code: dept.code,
+            name: dept.name,
+            description: dept.description,
+            requestTypes: {
+              create: dept.requestTypes.map((rt) => ({
+                code: rt.code,
+                name: rt.name,
+                description: rt.description,
+                defaultPriority: rt.defaultPriority,
+              })),
+            },
+          },
+        });
+      }
+
+      // 3. Create Company Admin User
+      const admin = await tx.user.create({
+        data: {
+          companyId: company.id,
+          ssoSubject: adminEmail,
+          email: adminEmail,
+          displayName: dto.adminName.trim() || adminEmail.split('@')[0],
+          platformRole: PlatformRole.SYSTEM_ADMIN,
+        },
+      });
+
+      return {
+        success: true,
+        company: {
+          id: company.id,
+          name: company.name,
+          slug: company.slug,
+        },
+        admin: {
+          id: admin.id,
+          email: admin.email,
+          displayName: admin.displayName,
+          platformRole: admin.platformRole,
+        },
+        message: `Company '${company.name}' successfully registered! Admin '${admin.email}' can now sign in.`,
+      };
     });
-    console.log(`  Department: ${created.code} (${created.name})`);
   }
 
-  // Create users
-  for (const u of demoUsers) {
-    await prisma.user.create({ data: { ...u, companyId: company.id } });
-  }
-  console.log(`  Users: ${demoUsers.length} created`);
-
-  // Create department memberships
-  const allDepts = await prisma.department.findMany({ where: { companyId: company.id } });
-  const findDept = (code: string) => allDepts.find((d) => d.code === code)!;
-
-  const memberships = [
-    { dept: 'IT', user: 'francis.king', role: DepartmentRole.AGENT },
-    { dept: 'HR', user: 'mike.howard', role: DepartmentRole.AGENT },
-    { dept: 'FAC', user: 'james.wilson', role: DepartmentRole.AGENT },
-  ];
-
-  for (const m of memberships) {
-    const dept = findDept(m.dept);
-    const user = await prisma.user.findUnique({ where: { ssoSubject: m.user } });
-    if (!user) { console.warn(`  User ${m.user} not found, skipping`); continue; }
-    await prisma.departmentMember.create({
-      data: {
-        departmentId: dept.id,
-        userId: user.id,
-        departmentRole: m.role,
-      },
+  async listCompanies() {
+    return this.prisma.company.findMany({
+      where: { active: true },
+      select: { id: true, name: true, slug: true, createdAt: true },
+      orderBy: { name: 'asc' },
     });
   }
-  console.log(`  Memberships: ${memberships.length} created`);
 
-  console.log('Seeding complete!');
+  async getCompanyBySlug(slug: string) {
+    return this.prisma.company.findUnique({
+      where: { slug },
+      select: { id: true, name: true, slug: true, active: true },
+    });
+  }
 }
-
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());

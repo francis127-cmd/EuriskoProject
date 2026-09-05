@@ -96,6 +96,7 @@ model Company {
 
   users       User[]
   departments Department[]
+  invitations Invitation[]
 
   @@index([slug])
 }
@@ -222,4 +223,22 @@ model NotificationEvent {
 
   @@index([status, createdAt])
   @@index([requestId])
+}
+
+// ─── Invitations ──────────────────────────────────────────────────
+model Invitation {
+  id             String          @id @default(uuid())
+  companyId      String
+  email          String
+  platformRole   PlatformRole    @default(EMPLOYEE)
+  departmentCode String?
+  departmentRole DepartmentRole?
+  token          String          @unique
+  expiresAt      DateTime
+  createdAt      DateTime        @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, email])
+  @@index([token])
 }

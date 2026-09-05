@@ -128,16 +128,18 @@ export class RequestsService {
     const request = await this.prisma.request.findUnique({
       where: { id },
       include: {
-        department: { select: { code: true, name: true } },
+        department: { select: { code: true, name: true, companyId: true } },
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
         documents: { where: { deletedAt: null } },
         auditLogs: { orderBy: { createdAt: 'desc' }, take: 20 },
       },
     });
-    if (!request) throw new NotFoundException('Request not found');
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
 
-    // Authorization: employee can only see own requests, dept members can see dept requests, admin sees all
+    // Authorization: employee can only see own requests, dept members can see dept requests, admin sees all in their company
     if (user.platformRole !== 'SYSTEM_ADMIN') {
       if (request.employeeId === user.sub) {
         // Employee — own request, allowed
@@ -151,8 +153,13 @@ export class RequestsService {
   }
 
   async claim(id: string, user: AuthUser) {
-    const request = await this.prisma.request.findUnique({ where: { id } });
-    if (!request) throw new NotFoundException('Request not found');
+    const request = await this.prisma.request.findUnique({
+      where: { id },
+      include: { department: { select: { companyId: true } } },
+    });
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
     if (request.status !== 'PENDING') throw new BadRequestException('Only PENDING requests can be claimed');
     if (request.claimedBy) throw new ConflictException('Request already claimed');
 
@@ -193,8 +200,13 @@ export class RequestsService {
   }
 
   async updateStatus(id: string, dto: UpdateRequestStatusDto, user: AuthUser) {
-    const request = await this.prisma.request.findUnique({ where: { id } });
-    if (!request) throw new NotFoundException('Request not found');
+    const request = await this.prisma.request.findUnique({
+      where: { id },
+      include: { department: { select: { companyId: true } } },
+    });
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
 
     // Authorization
     if (user.platformRole !== 'SYSTEM_ADMIN') {
@@ -259,8 +271,13 @@ export class RequestsService {
   }
 
   async cancel(id: string, user: AuthUser) {
-    const request = await this.prisma.request.findUnique({ where: { id } });
-    if (!request) throw new NotFoundException('Request not found');
+    const request = await this.prisma.request.findUnique({
+      where: { id },
+      include: { department: { select: { companyId: true } } },
+    });
+    if (!request || request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
     if (request.employeeId !== user.sub) throw new ForbiddenException('You can only cancel your own requests');
     if (request.status !== 'PENDING') throw new BadRequestException('Only PENDING requests can be cancelled');
 
@@ -290,10 +307,10 @@ export class RequestsService {
     });
 
     const where = user.platformRole === 'SYSTEM_ADMIN'
-      ? {}
+      ? { department: { companyId: user.companyId } }
       : isDeptStaff
-        ? { department: { members: { some: { userId: user.sub, active: true } } } }
-        : { employeeId: user.sub };
+        ? { department: { companyId: user.companyId, members: { some: { userId: user.sub, active: true } } } }
+        : { employeeId: user.sub, department: { companyId: user.companyId } };
 
     const [total, pending, inProgress, completed, rejected, cancelled] = await Promise.all([
       this.prisma.request.count({ where }),

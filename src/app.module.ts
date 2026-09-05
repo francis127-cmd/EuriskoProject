@@ -10,7 +10,9 @@ import { DocumentsModule } from './documents/documents.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { RetentionModule } from './retention/retention.module';
 import { AdminModule } from './admin/admin.module';
+import { CompaniesModule } from './companies/companies.module';
 import { InfraExceptionFilter } from './common/infra-exception.filter';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -29,7 +31,9 @@ import { InfraExceptionFilter } from './common/infra-exception.filter';
     CatalogModule,
     RetentionModule,
     AdminModule,
+    CompaniesModule,
   ],
+  controllers: [AppController],
   providers: [
     PrismaService,
     { provide: APP_FILTER, useClass: InfraExceptionFilter },
