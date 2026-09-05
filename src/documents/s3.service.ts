@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 
 const LOCAL_DIR = join(process.cwd(), 'uploads');
 
@@ -17,6 +17,8 @@ export class S3Service implements OnModuleInit {
     if (!endpoint) {
       this.useLocal = true;
       if (!existsSync(LOCAL_DIR)) mkdirSync(LOCAL_DIR, { recursive: true });
+      const docsDir = join(LOCAL_DIR, 'documents');
+      if (!existsSync(docsDir)) mkdirSync(docsDir, { recursive: true });
       this.logger.log('Using local file storage (no S3 configured)');
       return;
     }
@@ -36,7 +38,10 @@ export class S3Service implements OnModuleInit {
 
   async upload(key: string, buffer: Buffer, contentType: string): Promise<void> {
     if (this.useLocal) {
-      writeFileSync(join(LOCAL_DIR, key), buffer);
+      const filePath = join(LOCAL_DIR, key);
+      const dir = dirname(filePath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(filePath, buffer);
       this.logger.debug(`Uploaded locally: ${key} (${buffer.byteLength} bytes)`);
       return;
     }
