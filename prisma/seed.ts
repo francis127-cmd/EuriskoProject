@@ -68,7 +68,7 @@ const departments = [
 
 const demoUsers = [
   { ssoSubject: 'yorgo.cnam', displayName: 'Yorgo Cnam', email: 'yorgo.cnam@company.com', platformRole: PlatformRole.EMPLOYEE },
-  { ssoSubject: 'francis.king', displayName: 'Francis the King', email: 'francis.king@company.com', platformRole: PlatformRole.EMPLOYEE },
+  { ssoSubject: 'francis.king', displayName: 'Francis the King', email: 'francis.king@company.com', platformRole: PlatformRole.SYSTEM_ADMIN },
   { ssoSubject: 'mike.howard', displayName: 'Mike Howard', email: 'mike.howard@company.com', platformRole: PlatformRole.EMPLOYEE },
   { ssoSubject: 'james.wilson', displayName: 'James Wilson', email: 'james.wilson@company.com', platformRole: PlatformRole.EMPLOYEE },
 ];

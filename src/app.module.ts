@@ -9,6 +9,7 @@ import { RequestsModule } from './requests/requests.module';
 import { DocumentsModule } from './documents/documents.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { RetentionModule } from './retention/retention.module';
+import { AdminModule } from './admin/admin.module';
 import { InfraExceptionFilter } from './common/infra-exception.filter';
 
 @Module({
@@ -27,6 +28,7 @@ import { InfraExceptionFilter } from './common/infra-exception.filter';
     DocumentsModule,
     CatalogModule,
     RetentionModule,
+    AdminModule,
   ],
   providers: [
     PrismaService,
