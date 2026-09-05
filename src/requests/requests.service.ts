@@ -111,6 +111,19 @@ export class RequestsService {
     });
   }
 
+  async listClaimed(user: AuthUser) {
+    return this.prisma.request.findMany({
+      where: { claimedBy: user.sub, status: { in: ['IN_PROGRESS', 'COMPLETED'] } },
+      include: {
+        department: { select: { code: true, name: true } },
+        requestType: { select: { code: true, name: true } },
+        employee: { select: { id: true, displayName: true, email: true } },
+        documents: { where: { deletedAt: null }, select: { id: true, originalFilename: true } },
+      },
+      orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+    });
+  }
+
   async getOne(id: string, user: AuthUser) {
     const request = await this.prisma.request.findUnique({
       where: { id },

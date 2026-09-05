@@ -22,7 +22,10 @@ export class RequestsController {
 
   @Get()
   @ApiOperation({ summary: 'List requests (employee: own, dept member: dept queue)' })
-  list(@CurrentUser() user: AuthUser, @Query('department') department?: string) {
+  list(@CurrentUser() user: AuthUser, @Query('department') department?: string, @Query('view') view?: string) {
+    if (view === 'claimed') {
+      return this.requestsService.listClaimed(user);
+    }
     if (department) {
       return this.requestsService.listDepartmentQueue(user, department);
     }

@@ -67,8 +67,8 @@ const departments = [
 ];
 
 const demoUsers = [
-  { ssoSubject: 'alex.chen', displayName: 'Alex Chen', email: 'alex.chen@company.com', platformRole: PlatformRole.EMPLOYEE },
-  { ssoSubject: 'sara.kumar', displayName: 'Sara Kumar', email: 'sara.kumar@company.com', platformRole: PlatformRole.EMPLOYEE },
+  { ssoSubject: 'alex.chen', displayName: 'Yorgo Cnam', email: 'alex.chen@company.com', platformRole: PlatformRole.EMPLOYEE },
+  { ssoSubject: 'sara.kumar', displayName: 'Francis the King', email: 'sara.kumar@company.com', platformRole: PlatformRole.EMPLOYEE },
   { ssoSubject: 'mike.howard', displayName: 'Mike Howard', email: 'mike.howard@company.com', platformRole: PlatformRole.EMPLOYEE },
   { ssoSubject: 'james.wilson', displayName: 'James Wilson', email: 'james.wilson@company.com', platformRole: PlatformRole.EMPLOYEE },
 ];
