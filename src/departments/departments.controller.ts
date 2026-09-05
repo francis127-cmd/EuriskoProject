@@ -14,14 +14,14 @@ export class DepartmentsController {
 
   @Get()
   @ApiOperation({ summary: 'List active departments with their request types' })
-  list() {
-    return this.departmentsService.listActive();
+  list(@CurrentUser() user: AuthUser) {
+    return this.departmentsService.listActive(user.companyId);
   }
 
   @Get(':code')
   @ApiOperation({ summary: 'Get a department by code' })
-  get(@Param('code') code: string) {
-    return this.departmentsService.getDepartment(code);
+  get(@Param('code') code: string, @CurrentUser() user: AuthUser) {
+    return this.departmentsService.getDepartment(user.companyId, code);
   }
 
   @Get('me/memberships')

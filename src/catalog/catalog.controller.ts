@@ -1,6 +1,8 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtGuard } from '../auth/jwt.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { AuthUser } from '../auth/auth.service';
 import { DepartmentsService } from '../departments/departments.service';
 
 @ApiTags('catalog')
@@ -12,7 +14,7 @@ export class CatalogController {
 
   @Get()
   @ApiOperation({ summary: 'List all active departments with their request types' })
-  list() {
-    return this.departmentsService.listActive();
+  list(@CurrentUser() user: AuthUser) {
+    return this.departmentsService.listActive(user.companyId);
   }
 }

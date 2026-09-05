@@ -85,11 +85,19 @@ async function main() {
   await prisma.departmentMember.deleteMany();
   await prisma.department.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.company.deleteMany();
+
+  // Create demo company
+  const company = await prisma.company.create({
+    data: { name: 'Acme Corp', slug: 'acme' },
+  });
+  console.log(`  Company: ${company.name} (${company.id})`);
 
   // Create departments and request types
   for (const dept of departments) {
     const created = await prisma.department.create({
       data: {
+        companyId: company.id,
         code: dept.code,
         name: dept.name,
         description: dept.description,
@@ -108,22 +116,18 @@ async function main() {
 
   // Create users
   for (const u of demoUsers) {
-    await prisma.user.create({ data: u });
+    await prisma.user.create({ data: { ...u, companyId: company.id } });
   }
   console.log(`  Users: ${demoUsers.length} created`);
 
   // Create department memberships
-  const allDepts = await prisma.department.findMany();
+  const allDepts = await prisma.department.findMany({ where: { companyId: company.id } });
   const findDept = (code: string) => allDepts.find((d) => d.code === code)!;
 
   const memberships = [
-    // francis.king is IT agent
     { dept: 'IT', user: 'francis.king', role: DepartmentRole.AGENT },
-    // Mike is HR agent
     { dept: 'HR', user: 'mike.howard', role: DepartmentRole.AGENT },
-    // James is Facilities agent
     { dept: 'FAC', user: 'james.wilson', role: DepartmentRole.AGENT },
-    // Alex is pure employee (no department membership)
   ];
 
   for (const m of memberships) {

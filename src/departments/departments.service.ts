@@ -6,17 +6,17 @@ import { AuthUser } from '../auth/auth.service';
 export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listActive() {
+  async listActive(companyId: string) {
     return this.prisma.department.findMany({
-      where: { active: true },
+      where: { companyId, active: true },
       include: { requestTypes: { where: { active: true }, orderBy: { name: 'asc' } } },
       orderBy: { name: 'asc' },
     });
   }
 
-  async getDepartment(code: string) {
+  async getDepartment(companyId: string, code: string) {
     const dept = await this.prisma.department.findUnique({
-      where: { code },
+      where: { companyId_code: { companyId, code } },
       include: { requestTypes: { where: { active: true }, orderBy: { name: 'asc' } } },
     });
     if (!dept) throw new NotFoundException(`Department ${code} not found`);

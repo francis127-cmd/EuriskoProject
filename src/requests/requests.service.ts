@@ -28,7 +28,7 @@ export class RequestsService {
       throw new ForbiddenException('Administrators cannot create requests');
     }
 
-    const dept = await this.departments.getDepartment(dto.departmentCode);
+    const dept = await this.departments.getDepartment(user.companyId, dto.departmentCode);
 
     // Department staff cannot create requests to their OWN department
     const membership = await this.prisma.departmentMember.findUnique({
@@ -97,7 +97,7 @@ export class RequestsService {
   }
 
   async listDepartmentQueue(user: AuthUser, departmentCode: string) {
-    const dept = await this.departments.getDepartment(departmentCode);
+    const dept = await this.departments.getDepartment(user.companyId, departmentCode);
     await this.departments.assertMemberOf(user, dept.id);
 
     return this.prisma.request.findMany({
