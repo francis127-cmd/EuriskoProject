@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { PrismaClient, PlatformRole, DepartmentRole, Priority } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
