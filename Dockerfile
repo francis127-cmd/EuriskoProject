@@ -20,8 +20,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma/seed.ts ./prisma/seed.ts
-COPY --from=builder /app/start.sh ./start.sh
-RUN chmod +x ./start.sh
+COPY --from=builder /app/start.js ./start.js
 
 EXPOSE 3000
-CMD ["./start.sh"]
+CMD ["node", "start.js"]
