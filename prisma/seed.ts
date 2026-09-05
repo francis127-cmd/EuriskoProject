@@ -67,8 +67,8 @@ const departments = [
 ];
 
 const demoUsers = [
-  { ssoSubject: 'alex.chen', displayName: 'Yorgo Cnam', email: 'alex.chen@company.com', platformRole: PlatformRole.EMPLOYEE },
-  { ssoSubject: 'sara.kumar', displayName: 'Francis the King', email: 'sara.kumar@company.com', platformRole: PlatformRole.EMPLOYEE },
+  { ssoSubject: 'yorgo.cnam', displayName: 'Yorgo Cnam', email: 'yorgo.cnam@company.com', platformRole: PlatformRole.EMPLOYEE },
+  { ssoSubject: 'francis.king', displayName: 'Francis the King', email: 'francis.king@company.com', platformRole: PlatformRole.EMPLOYEE },
   { ssoSubject: 'mike.howard', displayName: 'Mike Howard', email: 'mike.howard@company.com', platformRole: PlatformRole.EMPLOYEE },
   { ssoSubject: 'james.wilson', displayName: 'James Wilson', email: 'james.wilson@company.com', platformRole: PlatformRole.EMPLOYEE },
 ];
@@ -117,8 +117,8 @@ async function main() {
   const findDept = (code: string) => allDepts.find((d) => d.code === code)!;
 
   const memberships = [
-    // Sara is IT agent
-    { dept: 'IT', user: 'sara.kumar', role: DepartmentRole.AGENT },
+    // francis.king is IT agent
+    { dept: 'IT', user: 'francis.king', role: DepartmentRole.AGENT },
     // Mike is HR agent
     { dept: 'HR', user: 'mike.howard', role: DepartmentRole.AGENT },
     // James is Facilities agent
