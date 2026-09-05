@@ -285,13 +285,15 @@ export class RequestsService {
   }
 
   async getStats(user: AuthUser) {
+    const isDeptStaff = await this.prisma.departmentMember.findFirst({
+      where: { userId: user.sub, active: true },
+    });
+
     const where = user.platformRole === 'SYSTEM_ADMIN'
       ? {}
-      : {
-          department: {
-            members: { some: { userId: user.sub, active: true } },
-          },
-        };
+      : isDeptStaff
+        ? { department: { members: { some: { userId: user.sub, active: true } } } }
+        : { employeeId: user.sub };
 
     const [total, pending, inProgress, completed, rejected, cancelled] = await Promise.all([
       this.prisma.request.count({ where }),
