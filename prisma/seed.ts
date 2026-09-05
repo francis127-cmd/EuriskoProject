@@ -132,7 +132,7 @@ async function main() {
 
   for (const m of memberships) {
     const dept = findDept(m.dept);
-    const user = await prisma.user.findUnique({ where: { ssoSubject: m.user } });
+    const user = await prisma.user.findFirst({ where: { ssoSubject: m.user } });
     if (!user) { console.warn(`  User ${m.user} not found, skipping`); continue; }
     await prisma.departmentMember.create({
       data: {

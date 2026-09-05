@@ -14,7 +14,7 @@ export class InvitationService {
     departmentCode?: string,
     departmentRole?: DepartmentRole
   ) {
-    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    const existingUser = await this.prisma.user.findFirst({ where: { email, companyId } });
     if (existingUser) {
       throw new BadRequestException('User already exists');
     }

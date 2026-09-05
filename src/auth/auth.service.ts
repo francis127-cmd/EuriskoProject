@@ -21,7 +21,7 @@ export class AuthService {
   ) {}
 
   async validateSsoToken(ssoSubject: string): Promise<AuthUser> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { ssoSubject },
       select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
     });
@@ -54,7 +54,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid Google token');
     }
 
-    let user = await this.prisma.user.findUnique({
+    let user = await this.prisma.user.findFirst({
       where: { email: payload.email },
       select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
     });
@@ -76,7 +76,6 @@ export class AuthService {
           displayName: payload.name || invite.email.split('@')[0],
           platformRole: invite.platformRole,
         },
-        select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true }
       });
 
       if (invite.departmentCode && invite.departmentRole) {

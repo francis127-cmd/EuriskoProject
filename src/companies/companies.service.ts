@@ -85,7 +85,7 @@ export class CompaniesService {
       throw new ConflictException(`Company with slug '${slug}' already exists`);
     }
 
-    const existingUser = await this.prisma.user.findUnique({ where: { email: adminEmail } });
+    const existingUser = await this.prisma.user.findFirst({ where: { email: adminEmail } });
     if (existingUser) {
       throw new ConflictException(`User with email '${adminEmail}' is already registered with another company`);
     }
