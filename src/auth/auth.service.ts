@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma.service';
+import { OAuth2Client } from 'google-auth-library';
 
 export interface AuthUser {
   sub: string;
@@ -8,6 +9,8 @@ export interface AuthUser {
   displayName: string;
   email: string;
 }
+
+const googleClient = new OAuth2Client();
 
 @Injectable()
 export class AuthService {
@@ -34,6 +37,40 @@ export class AuthService {
 
   async issueToken(ssoSubject: string): Promise<{ accessToken: string }> {
     const user = await this.validateSsoToken(ssoSubject);
+    const payload = { sub: user.sub, role: user.platformRole, name: user.displayName, email: user.email };
+    return { accessToken: this.jwt.sign(payload) };
+  }
+
+  async validateGoogleToken(idToken: string): Promise<AuthUser> {
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
+      throw new UnauthorizedException('Invalid Google token');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: payload.email },
+      select: { id: true, platformRole: true, displayName: true, email: true, active: true },
+    });
+
+    if (!user || !user.active) {
+      throw new UnauthorizedException(`No account found for ${payload.email}. Contact your administrator.`);
+    }
+
+    return {
+      sub: user.id,
+      platformRole: user.platformRole,
+      displayName: user.displayName,
+      email: user.email,
+    };
+  }
+
+  async issueGoogleToken(idToken: string): Promise<{ accessToken: string }> {
+    const user = await this.validateGoogleToken(idToken);
     const payload = { sub: user.sub, role: user.platformRole, name: user.displayName, email: user.email };
     return { accessToken: this.jwt.sign(payload) };
   }
