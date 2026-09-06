@@ -124,6 +124,15 @@ export class AuthService {
     return { accessToken: this.jwt.sign(payload) };
   }
 
+  async exchangeGoogleCode(code: string): Promise<{ accessToken: string }> {
+    const redirectUri = `${process.env.BACKEND_URL || 'https://euriskoproject.onrender.com'}/auth/google/callback`;
+    const { tokens } = await googleClient.getToken({ code, redirect_uri: redirectUri });
+    if (!tokens.id_token) {
+      throw new UnauthorizedException('No ID token received from Google');
+    }
+    return this.issueGoogleToken(tokens.id_token);
+  }
+
   async verifyToken(token: string): Promise<AuthUser> {
     try {
       const payload = this.jwt.verify<{ sub: string; companyId: string; role: string; name: string; email: string }>(token);
