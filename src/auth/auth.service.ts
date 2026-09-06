@@ -120,7 +120,7 @@ export class AuthService {
         });
         if (dept) {
           await this.prisma.departmentMember.upsert({
-            where: { departmentIdUserId: { userId: user.id, departmentId: dept.id } },
+            where: { departmentId_userId: { userId: user.id, departmentId: dept.id } },
             update: { departmentRole: invite.departmentRole },
             create: { userId: user.id, departmentId: dept.id, departmentRole: invite.departmentRole },
           });
