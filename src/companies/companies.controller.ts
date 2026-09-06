@@ -1,7 +1,11 @@
-import { Controller, Post, Get, Patch, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CompaniesService } from './companies.service';
 import { IsString, IsEmail, MinLength, IsOptional } from 'class-validator';
+import { JwtGuard } from '../auth/jwt.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { PlatformRole } from '@prisma/client';
 
 class RegisterCompanyDto {
   @IsString()
@@ -68,15 +72,36 @@ export class CompaniesController {
     return this.companiesService.getCompanyBySlug(slug);
   }
 
+  @Get(':id/settings')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(PlatformRole.SYSTEM_ADMIN)
+  @ApiOperation({ summary: 'Get company SSO settings (admin only)' })
+  async getSettings(@Param('id') id: string, @Request() req: any) {
+    if (req.user.companyId !== id) {
+      throw new Error('Cannot view settings for another company');
+    }
+    return this.companiesService.getCompanyById(id);
+  }
+
   @Patch(':id')
-  @ApiOperation({ summary: 'Update company name' })
-  update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(PlatformRole.SYSTEM_ADMIN)
+  @ApiOperation({ summary: 'Update company name (admin only)' })
+  async update(@Param('id') id: string, @Body() dto: UpdateCompanyDto, @Request() req: any) {
+    if (req.user.companyId !== id) {
+      throw new Error('Cannot update another company');
+    }
     return this.companiesService.updateCompany(id, dto.name);
   }
 
   @Patch(':id/sso')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(PlatformRole.SYSTEM_ADMIN)
   @ApiOperation({ summary: 'Update company SSO settings (admin only)' })
-  updateSso(@Param('id') id: string, @Body() dto: UpdateSsoDto) {
+  async updateSso(@Param('id') id: string, @Body() dto: UpdateSsoDto, @Request() req: any) {
+    if (req.user.companyId !== id) {
+      throw new Error('Cannot update settings for another company');
+    }
     return this.companiesService.updateCompanySso(id, dto);
   }
 }

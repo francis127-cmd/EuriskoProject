@@ -171,6 +171,13 @@ export class CompaniesService {
     });
   }
 
+  async getCompanyById(id: string) {
+    return this.prisma.company.findUnique({
+      where: { id },
+      select: { id: true, name: true, slug: true, domain: true, ssoProvider: true, googleClientId: true, createdAt: true },
+    });
+  }
+
   async getCompanyBySlug(slug: string) {
     return this.prisma.company.findUnique({
       where: { slug },
