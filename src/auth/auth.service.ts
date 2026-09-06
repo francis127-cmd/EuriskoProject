@@ -67,37 +67,60 @@ export class AuthService {
         where: { email: payload.email, expiresAt: { gt: new Date() } }
       });
 
-      if (!invite) {
-        throw new UnauthorizedException(`No account or pending invitation found for ${payload.email}. Contact your administrator.`);
-      }
-
-      const newUser = await this.prisma.user.create({
-        data: {
-          companyId: invite.companyId,
-          email: invite.email,
-          ssoSubject: payload.sub,
-          displayName: payload.name || invite.email.split('@')[0],
-          platformRole: invite.platformRole,
-        },
-      });
-
-      if (invite.departmentCode && invite.departmentRole) {
-        const dept = await this.prisma.department.findUnique({
-          where: { companyId_code: { companyId: invite.companyId, code: invite.departmentCode } }
+      if (invite) {
+        const newUser = await this.prisma.user.create({
+          data: {
+            companyId: invite.companyId,
+            email: invite.email,
+            ssoSubject: payload.sub,
+            displayName: payload.name || invite.email.split('@')[0],
+            platformRole: invite.platformRole,
+          },
         });
-        if (dept) {
-          await this.prisma.departmentMember.create({
-            data: {
-              departmentId: dept.id,
-              userId: newUser.id,
-              departmentRole: invite.departmentRole
-            }
-          });
-        }
-      }
 
-      await this.prisma.invitation.delete({ where: { id: invite.id } });
-      user = newUser;
+        if (invite.departmentCode && invite.departmentRole) {
+          const dept = await this.prisma.department.findUnique({
+            where: { companyId_code: { companyId: invite.companyId, code: invite.departmentCode } }
+          });
+          if (dept) {
+            await this.prisma.departmentMember.create({
+              data: {
+                departmentId: dept.id,
+                userId: newUser.id,
+                departmentRole: invite.departmentRole
+              }
+            });
+          }
+        }
+
+        await this.prisma.invitation.delete({ where: { id: invite.id } });
+        user = newUser;
+      } else {
+        const name = payload.name || payload.email.split('@')[0];
+        const slug = payload.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now().toString(36);
+
+        const company = await this.prisma.company.create({
+          data: { name: `${name}'s Company`, slug },
+        });
+
+        user = await this.prisma.user.create({
+          data: {
+            companyId: company.id,
+            email: payload.email,
+            ssoSubject: payload.sub,
+            displayName: name,
+            platformRole: 'SYSTEM_ADMIN',
+          },
+        });
+
+        return {
+          sub: user.id,
+          companyId: company.id,
+          platformRole: 'SYSTEM_ADMIN',
+          displayName: name,
+          email: payload.email,
+        };
+      }
     } else {
       await this.prisma.user.update({
         where: { id: user.id },
