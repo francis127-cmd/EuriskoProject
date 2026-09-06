@@ -4,6 +4,15 @@ import { AppModule } from './app.module';
 import { InfraExceptionFilter } from './common/infra-exception.filter';
 
 async function bootstrap() {
+  if (!process.env.JWT_SECRET) {
+    console.error('FATAL: JWT_SECRET environment variable is not set');
+    process.exit(1);
+  }
+  if (!process.env.DATABASE_URL) {
+    console.error('FATAL: DATABASE_URL environment variable is not set');
+    process.exit(1);
+  }
+
   const app = await NestFactory.create(AppModule);
   app.enableCors();
   app.useGlobalPipes(

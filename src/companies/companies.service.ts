@@ -71,18 +71,31 @@ export class CompaniesService {
   async registerCompany(dto: {
     name: string;
     slug: string;
+    domain: string;
     adminEmail: string;
     adminName: string;
+    googleClientId?: string;
   }) {
     const slug = dto.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+    const domain = dto.domain.toLowerCase().trim();
     const adminEmail = dto.adminEmail.toLowerCase().trim();
 
     if (!slug) throw new BadRequestException('Invalid slug');
+    if (!domain) throw new BadRequestException('Invalid domain');
     if (!adminEmail) throw new BadRequestException('Invalid admin email');
+
+    if (!adminEmail.endsWith(`@${domain}`)) {
+      throw new BadRequestException('Admin email must match company domain');
+    }
 
     const existingSlug = await this.prisma.company.findUnique({ where: { slug } });
     if (existingSlug) {
       throw new ConflictException(`Company with slug '${slug}' already exists`);
+    }
+
+    const existingDomain = await this.prisma.company.findUnique({ where: { domain } });
+    if (existingDomain) {
+      throw new ConflictException(`Company with domain '${domain}' already exists`);
     }
 
     const existingUser = await this.prisma.user.findFirst({ where: { email: adminEmail } });
@@ -91,11 +104,13 @@ export class CompaniesService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Create Company
       const company = await tx.company.create({
         data: {
           name: dto.name.trim(),
           slug,
+          domain,
+          ssoProvider: 'GOOGLE',
+          googleClientId: dto.googleClientId || null,
         },
       });
 
@@ -168,6 +183,24 @@ export class CompaniesService {
       where: { id },
       data: { name: name.trim() },
       select: { id: true, name: true, slug: true },
+    });
+  }
+
+  async updateCompanySso(id: string, dto: { googleClientId?: string; domain?: string }) {
+    const data: any = {};
+    if (dto.googleClientId !== undefined) data.googleClientId = dto.googleClientId || null;
+    if (dto.domain !== undefined) {
+      const domain = dto.domain.toLowerCase().trim();
+      if (domain) {
+        const existing = await this.prisma.company.findFirst({ where: { domain, NOT: { id } } });
+        if (existing) throw new ConflictException(`Domain '${domain}' is already used by another company`);
+      }
+      data.domain = domain || null;
+    }
+    return this.prisma.company.update({
+      where: { id },
+      data,
+      select: { id: true, name: true, slug: true, domain: true, ssoProvider: true, googleClientId: true },
     });
   }
 }

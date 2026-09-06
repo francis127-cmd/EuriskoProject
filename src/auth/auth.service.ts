@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma.service';
 import { OAuth2Client } from 'google-auth-library';
@@ -16,7 +16,7 @@ export interface GoogleAuthResult {
   newCompany: boolean;
 }
 
-const googleClient = new OAuth2Client(
+const defaultGoogleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
 );
@@ -28,31 +28,29 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  async validateSsoToken(ssoSubject: string): Promise<AuthUser> {
-    const user = await this.prisma.user.findFirst({
-      where: { ssoSubject },
-      select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
+  async discover(email: string): Promise<{ provider: string; googleClientId?: string; companySlug: string; companyName: string }> {
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) throw new NotFoundException('Invalid email');
+
+    const company = await this.prisma.company.findFirst({
+      where: { domain, active: true },
+      select: { id: true, name: true, slug: true, ssoProvider: true, googleClientId: true },
     });
-    if (!user || !user.active) {
-      throw new UnauthorizedException('Unknown or inactive user');
+
+    if (!company) {
+      throw new NotFoundException(`No company configured for domain '${domain}'. Contact your admin to set up SSO.`);
     }
+
     return {
-      sub: user.id,
-      companyId: user.companyId,
-      platformRole: user.platformRole,
-      displayName: user.displayName,
-      email: user.email,
+      provider: company.ssoProvider || 'GOOGLE',
+      googleClientId: company.googleClientId || undefined,
+      companySlug: company.slug,
+      companyName: company.name,
     };
   }
 
-  async issueToken(ssoSubject: string): Promise<{ accessToken: string }> {
-    const user = await this.validateSsoToken(ssoSubject);
-    const payload = { sub: user.sub, companyId: user.companyId, role: user.platformRole, name: user.displayName, email: user.email };
-    return { accessToken: this.jwt.sign(payload) };
-  }
-
   async validateGoogleToken(idToken: string): Promise<GoogleAuthResult> {
-    const ticket = await googleClient.verifyIdToken({
+    const ticket = await defaultGoogleClient.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
@@ -62,15 +60,36 @@ export class AuthService {
       throw new UnauthorizedException('Invalid Google token');
     }
 
+    const domain = payload.email.split('@')[1]?.toLowerCase();
+    if (!domain) {
+      throw new UnauthorizedException('Invalid email domain');
+    }
+
+    const company = await this.prisma.company.findFirst({
+      where: { domain, active: true },
+      select: { id: true, ssoProvider: true, googleClientId: true },
+    });
+
+    if (!company) {
+      throw new UnauthorizedException(`No company configured for domain '${domain}'`);
+    }
+
+    if (company.googleClientId) {
+      const audience = ticket.getPayload()?.aud;
+      if (audience !== company.googleClientId) {
+        throw new UnauthorizedException('Google token audience does not match company configuration');
+      }
+    }
+
     let user = await this.prisma.user.findFirst({
-      where: { email: payload.email },
+      where: { companyId: company.id, email: payload.email },
       select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
     });
 
     let newCompany = false;
 
     const invite = await this.prisma.invitation.findFirst({
-      where: { email: payload.email, expiresAt: { gt: new Date() } }
+      where: { email: payload.email, companyId: company.id, expiresAt: { gt: new Date() } }
     });
 
     if (invite) {
@@ -78,7 +97,6 @@ export class AuthService {
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
-            companyId: invite.companyId,
             platformRole: invite.platformRole,
             ssoSubject: payload.sub,
           },
@@ -87,7 +105,7 @@ export class AuthService {
       } else {
         user = await this.prisma.user.create({
           data: {
-            companyId: invite.companyId,
+            companyId: company.id,
             email: invite.email,
             ssoSubject: payload.sub,
             displayName: payload.name || invite.email.split('@')[0],
@@ -98,7 +116,7 @@ export class AuthService {
 
       if (invite.departmentCode && invite.departmentRole) {
         const dept = await this.prisma.department.findUnique({
-          where: { companyId_code: { companyId: invite.companyId, code: invite.departmentCode } }
+          where: { companyId_code: { companyId: company.id, code: invite.departmentCode } }
         });
         if (dept) {
           await this.prisma.departmentMember.upsert({
@@ -111,24 +129,16 @@ export class AuthService {
 
       await this.prisma.invitation.delete({ where: { id: invite.id } });
     } else if (!user) {
-      const name = payload.name || payload.email.split('@')[0];
-      const slug = payload.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now().toString(36);
-
-      const company = await this.prisma.company.create({
-        data: { name: `${name}'s Company`, slug },
+      user = await this.prisma.user.findFirst({
+        where: { email: payload.email },
+        select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
       });
 
-      user = await this.prisma.user.create({
-        data: {
-          companyId: company.id,
-          email: payload.email,
-          ssoSubject: payload.sub,
-          displayName: name,
-          platformRole: 'SYSTEM_ADMIN',
-        },
-      });
-
-      newCompany = true;
+      if (!user) {
+        throw new UnauthorizedException(
+          `No account found for ${payload.email}. You must be invited by your company admin before signing in.`
+        );
+      }
     } else {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -160,7 +170,7 @@ export class AuthService {
 
   async exchangeGoogleCode(code: string): Promise<{ accessToken: string }> {
     const redirectUri = `${process.env.BACKEND_URL || 'https://euriskoproject.onrender.com'}/auth/google/callback`;
-    const { tokens } = await googleClient.getToken({ code, redirect_uri: redirectUri });
+    const { tokens } = await defaultGoogleClient.getToken({ code, redirect_uri: redirectUri });
     if (!tokens.id_token) {
       throw new UnauthorizedException('No ID token received from Google');
     }

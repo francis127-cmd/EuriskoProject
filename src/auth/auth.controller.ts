@@ -2,12 +2,11 @@ import { Controller, Post, Get, Body, HttpCode, Query, Res } from '@nestjs/commo
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsEmail } from 'class-validator';
 
-class SsoLoginDto {
-  @IsOptional()
-  @IsString()
-  ssoSubject?: string;
+class DiscoverDto {
+  @IsEmail()
+  email!: string;
 }
 
 class GoogleLoginDto {
@@ -20,16 +19,13 @@ class GoogleLoginDto {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('token')
-  @HttpCode(201)
-  @ApiOperation({ summary: 'Exchange SSO subject for a JWT (mock SSO)' })
-  @ApiResponse({ status: 201, description: 'JWT issued.' })
-  @ApiResponse({ status: 401, description: 'Unknown or inactive user.' })
-  async token(@Body() dto: SsoLoginDto) {
-    if (!dto.ssoSubject) {
-      return { accessToken: '' };
-    }
-    return this.authService.issueToken(dto.ssoSubject);
+  @Post('discover')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Discover SSO provider for an email address' })
+  @ApiResponse({ status: 200, description: 'SSO provider info returned.' })
+  @ApiResponse({ status: 404, description: 'No company found for this email domain.' })
+  async discover(@Body() dto: DiscoverDto) {
+    return this.authService.discover(dto.email);
   }
 
   @Post('google')
