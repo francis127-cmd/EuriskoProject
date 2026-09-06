@@ -24,4 +24,3 @@ CREATE INDEX "Invitation_token_idx" ON "Invitation"("token");
 
 -- AddForeignKey
 ALTER TABLE "Invitation" ADD CONSTRAINT "Invitation_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-// build 1788699884
