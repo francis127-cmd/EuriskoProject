@@ -1,4 +1,6 @@
 const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 function run(cmd) {
   try {
@@ -13,13 +15,15 @@ let out = run('npx prisma migrate deploy');
 console.log(out);
 
 if (out.includes('P3009')) {
-  console.log('=== P3009 — cleaning stuck migrations ===');
-  const fs = require('fs');
-  const path = require('path');
-  const fixPath = path.join(process.cwd(), 'fix.sql');
-  fs.writeFileSync(fixPath, "DELETE FROM _prisma_migrations WHERE applied_at IS NULL AND started_at IS NOT NULL;\n");
-  run(`npx prisma db execute --file ${fixPath}`);
-  fs.unlinkSync(fixPath);
+  console.log('=== P3009 — resolving stuck migrations ===');
+  const matches = out.match(/`([\d_]+_[\w]+)` migration/);
+  if (matches && matches[1]) {
+    const name = matches[1];
+    console.log(`Resolving stuck migration: ${name}`);
+    const r = run(`npx prisma migrate resolve --rolled-back ${name}`);
+    console.log(r);
+  }
+  console.log('=== Retrying prisma migrate deploy ===');
   out = run('npx prisma migrate deploy');
   console.log(out);
 }
