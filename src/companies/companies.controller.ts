@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CompaniesService } from './companies.service';
 import { IsString, IsEmail, MinLength } from 'class-validator';
@@ -20,17 +20,20 @@ class RegisterCompanyDto {
   adminName!: string;
 }
 
+class UpdateCompanyDto {
+  @IsString()
+  @MinLength(2)
+  name!: string;
+}
+
 @ApiTags('companies')
 @Controller('companies')
 export class CompaniesController {
   constructor(private readonly companiesService: CompaniesService) {}
 
-  // NOTE: Intentionally unauthenticated — this is the entry point for new companies.
-  // The first admin needs to register without an existing account.
-  // In production, restrict by IP whitelist or add CAPTCHA/rate-limiting.
   @Post('register')
-  @ApiOperation({ summary: 'Register a new company and provision its default departments and admin' })
-  @ApiResponse({ status: 201, description: 'Company and admin created successfully.' })
+  @ApiOperation({ summary: 'Register a new company' })
+  @ApiResponse({ status: 201, description: 'Company and admin created.' })
   register(@Body() dto: RegisterCompanyDto) {
     return this.companiesService.registerCompany(dto);
   }
@@ -42,8 +45,14 @@ export class CompaniesController {
   }
 
   @Get(':slug')
-  @ApiOperation({ summary: 'Get company information by slug' })
+  @ApiOperation({ summary: 'Get company by slug' })
   getBySlug(@Param('slug') slug: string) {
     return this.companiesService.getCompanyBySlug(slug);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update company name' })
+  update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
+    return this.companiesService.updateCompany(id, dto.name);
   }
 }

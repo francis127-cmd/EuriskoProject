@@ -11,6 +11,11 @@ export interface AuthUser {
   email: string;
 }
 
+export interface GoogleAuthResult {
+  user: AuthUser;
+  newCompany: boolean;
+}
+
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
@@ -46,7 +51,7 @@ export class AuthService {
     return { accessToken: this.jwt.sign(payload) };
   }
 
-  async validateGoogleToken(idToken: string): Promise<AuthUser> {
+  async validateGoogleToken(idToken: string): Promise<GoogleAuthResult> {
     const ticket = await googleClient.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -61,6 +66,8 @@ export class AuthService {
       where: { email: payload.email },
       select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
     });
+
+    let newCompany = false;
 
     if (!user) {
       const invite = await this.prisma.invitation.findFirst({
@@ -113,13 +120,7 @@ export class AuthService {
           },
         });
 
-        return {
-          sub: user.id,
-          companyId: company.id,
-          platformRole: 'SYSTEM_ADMIN',
-          displayName: name,
-          email: payload.email,
-        };
+        newCompany = true;
       }
     } else {
       await this.prisma.user.update({
@@ -133,18 +134,21 @@ export class AuthService {
     }
 
     return {
-      sub: user.id,
-      companyId: user.companyId,
-      platformRole: user.platformRole,
-      displayName: user.displayName,
-      email: user.email,
+      user: {
+        sub: user.id,
+        companyId: user.companyId,
+        platformRole: user.platformRole,
+        displayName: user.displayName,
+        email: user.email,
+      },
+      newCompany,
     };
   }
 
-  async issueGoogleToken(idToken: string): Promise<{ accessToken: string }> {
-    const user = await this.validateGoogleToken(idToken);
-    const payload = { sub: user.sub, companyId: user.companyId, role: user.platformRole, name: user.displayName, email: user.email };
-    return { accessToken: this.jwt.sign(payload) };
+  async issueGoogleToken(idToken: string): Promise<{ accessToken: string; newCompany: boolean }> {
+    const result = await this.validateGoogleToken(idToken);
+    const payload = { sub: result.user.sub, companyId: result.user.companyId, role: result.user.platformRole, name: result.user.displayName, email: result.user.email };
+    return { accessToken: this.jwt.sign(payload), newCompany: result.newCompany };
   }
 
   async exchangeGoogleCode(code: string): Promise<{ accessToken: string }> {
@@ -153,7 +157,8 @@ export class AuthService {
     if (!tokens.id_token) {
       throw new UnauthorizedException('No ID token received from Google');
     }
-    return this.issueGoogleToken(tokens.id_token);
+    const result = await this.issueGoogleToken(tokens.id_token);
+    return { accessToken: result.accessToken };
   }
 
   async verifyToken(token: string): Promise<AuthUser> {

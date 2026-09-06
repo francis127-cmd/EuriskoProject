@@ -162,4 +162,12 @@ export class CompaniesService {
       select: { id: true, name: true, slug: true, active: true },
     });
   }
+
+  async updateCompany(id: string, name: string) {
+    return this.prisma.company.update({
+      where: { id },
+      data: { name: name.trim() },
+      select: { id: true, name: true, slug: true },
+    });
+  }
 }

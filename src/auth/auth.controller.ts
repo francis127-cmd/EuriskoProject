@@ -42,7 +42,7 @@ export class AuthController {
   }
 
   @Get('google/callback')
-  @ApiOperation({ summary: 'Google OAuth callback — exchanges code for JWT, redirects to app via deep link' })
+  @ApiOperation({ summary: 'Google OAuth callback' })
   async googleCallback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
     if (!code) {
       return res.status(400).send('Missing authorization code');
