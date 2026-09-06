@@ -50,7 +50,10 @@ export class AuthController {
     try {
       const { accessToken } = await this.authService.exchangeGoogleCode(code);
       const deepLink = `eurisko-hub://auth?token=${encodeURIComponent(accessToken)}`;
-      return res.redirect(deepLink);
+      return res.type('html').send(`<!DOCTYPE html><html><head><title>Signing in...</title></head><body>
+        <p>Redirecting to app...</p>
+        <script>window.location.href=${JSON.stringify(deepLink)};</script>
+        </body></html>`);
     } catch (err: any) {
       return res.status(401).send(`Authentication failed: ${err.message || 'Unknown error'}`);
     }
