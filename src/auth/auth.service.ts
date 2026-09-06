@@ -69,13 +69,23 @@ export class AuthService {
 
     let newCompany = false;
 
-    if (!user) {
-      const invite = await this.prisma.invitation.findFirst({
-        where: { email: payload.email, expiresAt: { gt: new Date() } }
-      });
+    const invite = await this.prisma.invitation.findFirst({
+      where: { email: payload.email, expiresAt: { gt: new Date() } }
+    });
 
-      if (invite) {
-        const newUser = await this.prisma.user.create({
+    if (invite) {
+      if (user) {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            companyId: invite.companyId,
+            platformRole: invite.platformRole,
+            ssoSubject: payload.sub,
+          },
+          select: { id: true, companyId: true, platformRole: true, displayName: true, email: true, active: true },
+        });
+      } else {
+        user = await this.prisma.user.create({
           data: {
             companyId: invite.companyId,
             email: invite.email,
@@ -84,44 +94,41 @@ export class AuthService {
             platformRole: invite.platformRole,
           },
         });
-
-        if (invite.departmentCode && invite.departmentRole) {
-          const dept = await this.prisma.department.findUnique({
-            where: { companyId_code: { companyId: invite.companyId, code: invite.departmentCode } }
-          });
-          if (dept) {
-            await this.prisma.departmentMember.create({
-              data: {
-                departmentId: dept.id,
-                userId: newUser.id,
-                departmentRole: invite.departmentRole
-              }
-            });
-          }
-        }
-
-        await this.prisma.invitation.delete({ where: { id: invite.id } });
-        user = newUser;
-      } else {
-        const name = payload.name || payload.email.split('@')[0];
-        const slug = payload.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now().toString(36);
-
-        const company = await this.prisma.company.create({
-          data: { name: `${name}'s Company`, slug },
-        });
-
-        user = await this.prisma.user.create({
-          data: {
-            companyId: company.id,
-            email: payload.email,
-            ssoSubject: payload.sub,
-            displayName: name,
-            platformRole: 'SYSTEM_ADMIN',
-          },
-        });
-
-        newCompany = true;
       }
+
+      if (invite.departmentCode && invite.departmentRole) {
+        const dept = await this.prisma.department.findUnique({
+          where: { companyId_code: { companyId: invite.companyId, code: invite.departmentCode } }
+        });
+        if (dept) {
+          await this.prisma.departmentMember.upsert({
+            where: { departmentIdUserId: { userId: user.id, departmentId: dept.id } },
+            update: { departmentRole: invite.departmentRole },
+            create: { userId: user.id, departmentId: dept.id, departmentRole: invite.departmentRole },
+          });
+        }
+      }
+
+      await this.prisma.invitation.delete({ where: { id: invite.id } });
+    } else if (!user) {
+      const name = payload.name || payload.email.split('@')[0];
+      const slug = payload.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now().toString(36);
+
+      const company = await this.prisma.company.create({
+        data: { name: `${name}'s Company`, slug },
+      });
+
+      user = await this.prisma.user.create({
+        data: {
+          companyId: company.id,
+          email: payload.email,
+          ssoSubject: payload.sub,
+          displayName: name,
+          platformRole: 'SYSTEM_ADMIN',
+        },
+      });
+
+      newCompany = true;
     } else {
       await this.prisma.user.update({
         where: { id: user.id },
