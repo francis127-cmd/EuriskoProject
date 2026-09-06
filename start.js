@@ -31,6 +31,16 @@ BEGIN
     RAISE NOTICE 'Added googleClientId column to Company';
   END IF;
 
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Company' AND column_name = 'authMode') THEN
+    ALTER TABLE "Company" ADD COLUMN "authMode" TEXT DEFAULT 'PASSWORD';
+    RAISE NOTICE 'Added authMode column to Company';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'User' AND column_name = 'passwordHash') THEN
+    ALTER TABLE "User" ADD COLUMN "passwordHash" TEXT;
+    RAISE NOTICE 'Added passwordHash column to User';
+  END IF;
+
   IF NOT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Invitation') THEN
     CREATE TABLE "Invitation" (
       "id" TEXT NOT NULL,

@@ -29,6 +29,11 @@ class RegisterCompanyDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(8)
+  adminPassword?: string;
+
+  @IsOptional()
+  @IsString()
   googleClientId?: string;
 }
 
@@ -46,6 +51,10 @@ class UpdateSsoDto {
   @IsOptional()
   @IsString()
   domain?: string;
+
+  @IsOptional()
+  @IsString()
+  authMode?: string;
 }
 
 @ApiTags('companies')

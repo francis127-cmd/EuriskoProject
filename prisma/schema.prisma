@@ -41,11 +41,12 @@ enum EventStatus {
   FAILED
 }
 
-// ─── Users (SSO-backed) ───────────────────────────────────────────
+// ─── Users (SSO-backed or password-based) ────────────────────────
 model User {
   id           String       @id @default(uuid())
   companyId    String
-  ssoSubject   String
+  ssoSubject   String?      // null for password-based users
+  passwordHash String?      // null for SSO users
   displayName  String
   email        String
   platformRole PlatformRole @default(EMPLOYEE)
@@ -60,9 +61,9 @@ model User {
   uploadedDocs  Document[]
   auditActions  AuditLog[]
 
-  @@unique([companyId, ssoSubject])
   @@unique([companyId, email])
   @@index([companyId])
+  @@index([companyId, email])
 }
 
 // ─── Departments ──────────────────────────────────────────────────
@@ -93,6 +94,7 @@ model Company {
   domain    String?  @unique
   active    Boolean  @default(true)
 
+  authMode        String?  @default("PASSWORD")  // "SSO" or "PASSWORD"
   ssoProvider     String?  @default("GOOGLE")
   googleClientId  String?
 

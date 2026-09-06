@@ -1,6 +1,7 @@
 import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { PlatformRole, Priority } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 export const DEFAULT_DEPARTMENTS = [
   {
@@ -74,6 +75,7 @@ export class CompaniesService {
     domain: string;
     adminEmail: string;
     adminName: string;
+    adminPassword?: string;
     googleClientId?: string;
   }) {
     const slug = dto.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
@@ -103,13 +105,24 @@ export class CompaniesService {
       throw new ConflictException(`User with email '${adminEmail}' is already registered with another company`);
     }
 
+    // Determine auth mode: SSO if googleClientId provided, PASSWORD otherwise
+    const authMode = dto.googleClientId ? 'SSO' : 'PASSWORD';
+    const passwordHash = authMode === 'PASSWORD' && dto.adminPassword
+      ? await bcrypt.hash(dto.adminPassword, 12)
+      : null;
+
+    if (authMode === 'PASSWORD' && !dto.adminPassword) {
+      throw new BadRequestException('Admin password is required for password-based companies');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const company = await tx.company.create({
         data: {
           name: dto.name.trim(),
           slug,
           domain,
-          ssoProvider: 'GOOGLE',
+          authMode,
+          ssoProvider: authMode === 'SSO' ? 'GOOGLE' : null,
           googleClientId: dto.googleClientId || null,
         },
       });
@@ -138,7 +151,8 @@ export class CompaniesService {
       const admin = await tx.user.create({
         data: {
           companyId: company.id,
-          ssoSubject: adminEmail,
+          ssoSubject: authMode === 'SSO' ? adminEmail : null,
+          passwordHash,
           email: adminEmail,
           displayName: dto.adminName.trim() || adminEmail.split('@')[0],
           platformRole: PlatformRole.SYSTEM_ADMIN,
@@ -151,6 +165,7 @@ export class CompaniesService {
           id: company.id,
           name: company.name,
           slug: company.slug,
+          authMode,
         },
         admin: {
           id: admin.id,
@@ -158,7 +173,7 @@ export class CompaniesService {
           displayName: admin.displayName,
           platformRole: admin.platformRole,
         },
-        message: `Company '${company.name}' successfully registered! Admin '${admin.email}' can now sign in.`,
+        message: `Company '${company.name}' (${authMode} mode) registered! Admin '${admin.email}' can now sign in.`,
       };
     });
   }
@@ -174,7 +189,7 @@ export class CompaniesService {
   async getCompanyById(id: string) {
     return this.prisma.company.findUnique({
       where: { id },
-      select: { id: true, name: true, slug: true, domain: true, ssoProvider: true, googleClientId: true, createdAt: true },
+      select: { id: true, name: true, slug: true, domain: true, authMode: true, ssoProvider: true, googleClientId: true, createdAt: true },
     });
   }
 
@@ -193,9 +208,16 @@ export class CompaniesService {
     });
   }
 
-  async updateCompanySso(id: string, dto: { googleClientId?: string; domain?: string }) {
+  async updateCompanySso(id: string, dto: { googleClientId?: string; domain?: string; authMode?: string }) {
     const data: any = {};
     if (dto.googleClientId !== undefined) data.googleClientId = dto.googleClientId || null;
+    if (dto.authMode !== undefined) {
+      if (!['SSO', 'PASSWORD'].includes(dto.authMode)) {
+        throw new BadRequestException('authMode must be SSO or PASSWORD');
+      }
+      data.authMode = dto.authMode;
+      if (dto.authMode === 'SSO') data.ssoProvider = 'GOOGLE';
+    }
     if (dto.domain !== undefined) {
       const domain = dto.domain.toLowerCase().trim();
       if (domain) {
@@ -207,7 +229,7 @@ export class CompaniesService {
     return this.prisma.company.update({
       where: { id },
       data,
-      select: { id: true, name: true, slug: true, domain: true, ssoProvider: true, googleClientId: true },
+      select: { id: true, name: true, slug: true, domain: true, authMode: true, ssoProvider: true, googleClientId: true },
     });
   }
 }
