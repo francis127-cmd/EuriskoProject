@@ -89,7 +89,7 @@ async function main() {
 
   // Create demo company
   const company = await prisma.company.create({
-    data: { name: 'Acme Corp', slug: 'acme' },
+    data: { name: 'Acme Corp', slug: 'acme', domain: 'company.com' },
   });
   console.log(`  Company: ${company.name} (${company.id})`);
 
