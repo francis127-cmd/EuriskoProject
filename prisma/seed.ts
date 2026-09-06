@@ -81,7 +81,11 @@ async function main() {
   });
 
   if (existingCompany) {
-    console.log('Seed company (Acme Corp) already exists. Skipping destructive wipe.');
+    console.log('Seed company (Acme Corp) already exists.');
+    if (!existingCompany.domain) {
+      await prisma.company.update({ where: { id: existingCompany.id }, data: { domain: 'company.com' } });
+      console.log('  Backfilled domain to company.com');
+    }
     return;
   }
 
