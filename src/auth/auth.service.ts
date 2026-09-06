@@ -11,7 +11,10 @@ export interface AuthUser {
   email: string;
 }
 
-const googleClient = new OAuth2Client();
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+);
 
 @Injectable()
 export class AuthService {
@@ -41,6 +44,19 @@ export class AuthService {
     const user = await this.validateSsoToken(ssoSubject);
     const payload = { sub: user.sub, companyId: user.companyId, role: user.platformRole, name: user.displayName, email: user.email };
     return { accessToken: this.jwt.sign(payload) };
+  }
+
+  async exchangeGoogleCode(code: string): Promise<{ accessToken: string }> {
+    const { tokens } = await googleClient.getToken({
+      code,
+      redirect_uri: `${process.env.BACKEND_URL || 'https://euriskoproject.onrender.com'}/auth/google/callback`,
+    });
+
+    if (!tokens.id_token) {
+      throw new UnauthorizedException('No ID token received from Google');
+    }
+
+    return this.issueGoogleToken(tokens.id_token);
   }
 
   async validateGoogleToken(idToken: string): Promise<AuthUser> {
@@ -96,7 +112,6 @@ export class AuthService {
       await this.prisma.invitation.delete({ where: { id: invite.id } });
       user = newUser;
     } else {
-      // If user existed with placeholder ssoSubject (e.g. from admin pre-provisioning), update with Google sub
       await this.prisma.user.update({
         where: { id: user.id },
         data: { ssoSubject: payload.sub },

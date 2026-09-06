@@ -1,5 +1,6 @@
-import { Controller, Post, Body, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Body, HttpCode, Query, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { IsString, IsOptional } from 'class-validator';
 
@@ -38,5 +39,23 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid Google token or no matching account.' })
   async google(@Body() dto: GoogleLoginDto) {
     return this.authService.issueGoogleToken(dto.idToken);
+  }
+
+  @Get('google/callback')
+  @ApiOperation({ summary: 'Google OAuth callback — exchanges code for JWT, redirects to app' })
+  async googleCallback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
+    if (!code) {
+      return res.status(400).send('Missing authorization code');
+    }
+
+    try {
+      const { accessToken } = await this.authService.exchangeGoogleCode(code);
+      const deepLink = state
+        ? `eurisko-hub://auth?token=${accessToken}&state=${state}`
+        : `eurisko-hub://auth?token=${accessToken}`;
+      return res.redirect(deepLink);
+    } catch (err: any) {
+      return res.status(401).send(`Authentication failed: ${err.message || 'Unknown error'}`);
+    }
   }
 }
