@@ -1,6 +1,6 @@
-import 'dotenv/config';
-import { execSync } from 'child_process';
-import { PrismaClient } from '@prisma/client';
+require('dotenv/config');
+const { execSync } = require('child_process');
+const { PrismaClient } = require('@prisma/client');
 
 async function main() {
   console.log('[start.js] Running startup tasks...');
@@ -18,7 +18,6 @@ async function main() {
     `);
     console.log('[start.js] Columns ensured.');
 
-    // Make ssoSubject nullable if it was NOT NULL
     await client.$executeRawUnsafe(`
       DO $$ BEGIN
         ALTER TABLE "User" ALTER COLUMN "ssoSubject" DROP NOT NULL;
@@ -26,12 +25,11 @@ async function main() {
       END $$;
     `);
 
-    // Drop old unique indexes that conflict with the new schema
     await client.$executeRawUnsafe(`
       DROP INDEX IF EXISTS "User_companyId_ssoSubject_key";
     `);
   } catch (e) {
-    console.warn('[start.js] Column setup warning:', (e as Error).message);
+    console.warn('[start.js] Column setup warning:', e && e.message ? e.message : e);
   } finally {
     await client.$disconnect();
   }
@@ -48,7 +46,7 @@ async function main() {
     console.log('[start.js] Stuck migrations cleaned.');
     await stuckClient.$disconnect();
   } catch (e) {
-    console.warn('[start.js] Stuck migration cleanup warning:', (e as Error).message);
+    console.warn('[start.js] Stuck migration cleanup warning:', e && e.message ? e.message : e);
   }
 
   // Step 3: Run Prisma migrations
@@ -57,8 +55,7 @@ async function main() {
     execSync('npx prisma migrate deploy', { stdio: 'inherit' });
     console.log('[start.js] Migrations applied.');
   } catch (e) {
-    console.error('[start.js] Migration failed:', (e as Error).message);
-    // Don't exit — the app might still work with existing schema
+    console.error('[start.js] Migration failed:', e && e.message ? e.message : e);
   }
 
   // Step 4: Generate Prisma Client
@@ -67,7 +64,7 @@ async function main() {
     execSync('npx prisma generate', { stdio: 'inherit' });
     console.log('[start.js] Prisma client generated.');
   } catch (e) {
-    console.error('[start.js] Generate failed:', (e as Error).message);
+    console.error('[start.js] Generate failed:', e && e.message ? e.message : e);
   }
 
   // Step 5: Start the application
