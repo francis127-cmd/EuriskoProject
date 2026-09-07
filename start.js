@@ -1,13 +1,19 @@
 require('dotenv/config');
 const { execSync } = require('child_process');
 const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+
+function createClient() {
+  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  return new PrismaClient({ adapter });
+}
 
 async function main() {
   console.log('[start.js] Running startup tasks...');
 
   // Step 1: Ensure required columns exist (idempotent)
   console.log('[start.js] Ensuring required columns...');
-  const client = new PrismaClient();
+  const client = createClient();
   try {
     await client.$executeRawUnsafe(`
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "domain" TEXT;
