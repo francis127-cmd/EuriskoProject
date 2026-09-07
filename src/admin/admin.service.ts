@@ -1,15 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma.service';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { ScopedPrismaService } from '../scoped-prisma.service';
 import { AuthUser } from '../auth/auth.service';
 import { DepartmentRole, PlatformRole } from '@prisma/client';
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(private readonly prisma: ScopedPrismaService) {}
 
   async listUsers(admin: AuthUser) {
     return this.prisma.user.findMany({
-      where: { companyId: admin.companyId },
       include: {
         memberships: {
           include: { department: { select: { code: true, name: true } } },
@@ -75,7 +76,7 @@ export class AdminService {
 
   async listDepartments(admin: AuthUser) {
     return this.prisma.department.findMany({
-      where: { companyId: admin.companyId, active: true },
+      where: { active: true },
       select: { id: true, code: true, name: true },
       orderBy: { name: 'asc' },
     });

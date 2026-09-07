@@ -1,32 +1,50 @@
-import { Controller, Get, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
-import { JwtGuard } from '../auth/jwt.guard';
-import { AdminGuard } from './admin.guard';
+import { Controller, Get, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
-import { AuthUser } from '../auth/auth.service';
+import { AdminGuard } from './admin.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { AuthUser } from '../auth/auth.service';
+import { IsOptional, IsString } from 'class-validator';
+
+class UpdateUserDto {
+  @IsOptional()
+  @IsString()
+  departmentCode?: string;
+
+  @IsOptional()
+  @IsString()
+  departmentRole?: string;
+
+  @IsOptional()
+  @IsString()
+  platformRole?: string;
+}
 
 @Controller('admin')
-@UseGuards(JwtGuard, AdminGuard)
+@UseGuards(AdminGuard)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Get('users')
-  listUsers(@CurrentUser() user: AuthUser) {
+  async listUsers(@CurrentUser() user: AuthUser) {
     return this.adminService.listUsers(user);
   }
 
-  @Patch('users/:id')
-  updateUser(@Param('id') id: string, @Body() dto: { departmentCode?: string; departmentRole?: string; platformRole?: string }, @CurrentUser() user: AuthUser) {
-    return this.adminService.updateUser(id, dto, user);
+  @Patch('users/:userId')
+  async updateUser(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.updateUser(userId, dto, user);
   }
 
-  @Delete('users/:id')
-  deactivateUser(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.adminService.deactivateUser(id, user);
+  @Delete('users/:userId')
+  async deactivateUser(@Param('userId') userId: string, @CurrentUser() user: AuthUser) {
+    return this.adminService.deactivateUser(userId, user);
   }
 
   @Get('departments')
-  listDepartments(@CurrentUser() user: AuthUser) {
+  async listDepartments(@CurrentUser() user: AuthUser) {
     return this.adminService.listDepartments(user);
   }
 }

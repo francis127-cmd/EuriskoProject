@@ -1,46 +1,43 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma.service';
-import { PlatformRole, DepartmentRole } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { AdminPrismaService } from '../admin-prisma.service';
 import { randomBytes } from 'crypto';
 
 @Injectable()
 export class InvitationService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(InvitationService.name);
 
-  async createInvitation(
-    companyId: string, 
-    email: string, 
-    platformRole: PlatformRole = 'EMPLOYEE',
-    departmentCode?: string,
-    departmentRole?: DepartmentRole
-  ) {
-    const existingUser = await this.prisma.user.findFirst({ where: { email, companyId } });
-    if (existingUser) {
-      throw new BadRequestException('User already exists');
-    }
+  constructor(private readonly prisma: AdminPrismaService) {}
 
-    await this.prisma.invitation.deleteMany({
-      where: { companyId, email }
-    });
-
+  async create(data: {
+    companyId: string;
+    email: string;
+    platformRole?: string;
+    departmentCode?: string;
+    departmentRole?: string;
+  }) {
     const token = randomBytes(32).toString('hex');
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     const invitation = await this.prisma.invitation.create({
       data: {
-        companyId,
-        email,
-        platformRole,
-        departmentCode,
-        departmentRole,
+        companyId: data.companyId,
+        email: data.email,
+        platformRole: (data.platformRole as any) || 'EMPLOYEE',
+        departmentCode: data.departmentCode,
+        departmentRole: (data.departmentRole as any) || null,
         token,
         expiresAt,
-      }
+      },
+      include: { company: { select: { name: true } } },
     });
 
-    console.log(`[Email Mock] Send invite to ${email} with deep link: hr-mobile://invite?token=${token}`);
+    this.logger.log(`Invitation created for ${data.email} to ${invitation.company.name} (token: ${token})`);
 
-    return invitation;
+    return {
+      id: invitation.id,
+      email: invitation.email,
+      token: invitation.token,
+      expiresAt: invitation.expiresAt.toISOString(),
+    };
   }
 }

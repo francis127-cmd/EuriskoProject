@@ -1,55 +1,59 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { PrismaService } from '../prisma.service';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { ScopedPrismaService } from '../scoped-prisma.service';
 import { AuthUser } from '../auth/auth.service';
 
 @Injectable()
 export class DepartmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(DepartmentsService.name);
 
-  async listActive(companyId: string) {
+  constructor(private readonly prisma: ScopedPrismaService) {}
+
+  /**
+   * List active departments in the authenticated user's company.
+   * The ScopedPrismaService middleware auto-filters by companyId.
+   */
+  async listActive(user: AuthUser) {
     return this.prisma.department.findMany({
-      where: { companyId, active: true },
-      include: { requestTypes: { where: { active: true }, orderBy: { name: 'asc' } } },
+      where: { active: true },
+      include: { requestTypes: true },
       orderBy: { name: 'asc' },
     });
   }
 
+  /**
+   * Get a single department by companyId + code composite key.
+   */
   async getDepartment(companyId: string, code: string) {
     const dept = await this.prisma.department.findUnique({
       where: { companyId_code: { companyId, code } },
-      include: { requestTypes: { where: { active: true }, orderBy: { name: 'asc' } } },
+      include: { requestTypes: true },
     });
-    if (!dept) throw new NotFoundException(`Department ${code} not found`);
+    if (!dept) {
+      throw new NotFoundException(`Department ${code} not found`);
+    }
     return dept;
   }
 
-  async getMemberships(userId: string) {
-    return this.prisma.departmentMember.findMany({
-      where: { userId, active: true },
-      include: { department: true },
-    });
-  }
-
+  /**
+   * Assert the user is a member of the given department.
+   */
   async assertMemberOf(user: AuthUser, departmentId: string) {
-    const membership = await this.prisma.departmentMember.findUnique({
+    const member = await this.prisma.departmentMember.findUnique({
       where: { departmentId_userId: { departmentId, userId: user.sub } },
     });
-    if (!membership || !membership.active) {
-      throw new ForbiddenException('You are not a member of this department');
+    if (!member && user.role !== 'SYSTEM_ADMIN') {
+      throw new NotFoundException('You are not a member of this department');
     }
-    return membership;
   }
 
-  async assertManager(user: AuthUser, departmentId: string) {
-    const membership = await this.assertMemberOf(user, departmentId);
-    if (membership.departmentRole !== 'MANAGER') {
-      throw new ForbiddenException('Manager role required');
-    }
-    return membership;
-  }
-
-  async assertAdminOrDeptMember(user: AuthUser, departmentId: string) {
-    if (user.platformRole === 'SYSTEM_ADMIN') return null;
-    return this.assertMemberOf(user, departmentId);
+  async getMemberships(user: AuthUser) {
+    return this.prisma.departmentMember.findMany({
+      where: { userId: user.sub },
+      include: {
+        department: {
+          select: { id: true, code: true, name: true, description: true, active: true },
+        },
+      },
+    });
   }
 }

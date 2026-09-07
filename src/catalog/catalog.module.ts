@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
 import { CatalogController } from './catalog.controller';
-import { DepartmentsModule } from '../departments/departments.module';
-import { AuthModule } from '../auth/auth.module';
+import { ScopedPrismaService } from '../scoped-prisma.service';
 
 @Module({
-  imports: [DepartmentsModule, AuthModule],
   controllers: [CatalogController],
+  providers: [ScopedPrismaService],
 })
 export class CatalogModule {}

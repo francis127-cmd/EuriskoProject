@@ -1,47 +1,37 @@
-import { Controller, Post, Body, UseGuards, Request, ForbiddenException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Post, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { InvitationService } from './invitation.service';
-import { JwtGuard } from './jwt.guard';
-import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
-import { PlatformRole, DepartmentRole } from '@prisma/client';
+import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
-class CreateInviteDto {
+class CreateInvitationDto {
   @IsEmail()
-  email!: string;
+  email: string;
 
   @IsOptional()
-  @IsEnum(PlatformRole)
-  platformRole?: PlatformRole;
+  @IsString()
+  platformRole?: string;
 
   @IsOptional()
   @IsString()
   departmentCode?: string;
 
   @IsOptional()
-  @IsEnum(DepartmentRole)
-  departmentRole?: DepartmentRole;
+  @IsString()
+  departmentRole?: string;
 }
 
-@ApiTags('invitations')
-@ApiBearerAuth()
-@UseGuards(JwtGuard)
 @Controller('invitations')
 export class InvitationController {
   constructor(private readonly invitationService: InvitationService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Admin creates an invitation for a new user' })
-  async createInvite(@Body() dto: CreateInviteDto, @Request() req: any) {
-    if (req.user.platformRole !== 'SYSTEM_ADMIN') {
-      throw new ForbiddenException('Only system admins can invite users');
-    }
-
-    return this.invitationService.createInvitation(
-      req.user.companyId,
-      dto.email,
-      dto.platformRole,
-      dto.departmentCode,
-      dto.departmentRole
-    );
+  @HttpCode(HttpStatus.CREATED)
+  async create(@Body() dto: CreateInvitationDto, @Body('companyId') companyId: string) {
+    return this.invitationService.create({
+      companyId,
+      email: dto.email,
+      platformRole: dto.platformRole,
+      departmentCode: dto.departmentCode,
+      departmentRole: dto.departmentRole,
+    });
   }
 }

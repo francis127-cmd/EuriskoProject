@@ -2,14 +2,13 @@ import { Module } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
 import { DocumentsController } from './documents.controller';
 import { S3Service } from './s3.service';
-import { PrismaService } from '../prisma.service';
 import { DepartmentsModule } from '../departments/departments.module';
-import { AuthModule } from '../auth/auth.module';
+import { ScopedPrismaService } from '../scoped-prisma.service';
 
 @Module({
-  imports: [DepartmentsModule, AuthModule],
+  imports: [DepartmentsModule],
   controllers: [DocumentsController],
-  providers: [DocumentsService, S3Service, PrismaService],
+  providers: [DocumentsService, S3Service, ScopedPrismaService],
   exports: [DocumentsService],
 })
 export class DocumentsModule {}

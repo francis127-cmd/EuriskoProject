@@ -1,20 +1,19 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtGuard } from '../auth/jwt.guard';
+import { Controller, Get } from '@nestjs/common';
+import { ScopedPrismaService } from '../scoped-prisma.service';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.service';
-import { DepartmentsService } from '../departments/departments.service';
 
-@ApiTags('catalog')
-@ApiBearerAuth()
-@UseGuards(JwtGuard)
 @Controller('catalog')
 export class CatalogController {
-  constructor(private readonly departmentsService: DepartmentsService) {}
+  constructor(private readonly prisma: ScopedPrismaService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all active departments with their request types' })
-  list(@CurrentUser() user: AuthUser) {
-    return this.departmentsService.listActive(user.companyId);
+  async getCatalog(@CurrentUser() user: AuthUser) {
+    const departments = await this.prisma.department.findMany({
+      where: { active: true },
+      include: { requestTypes: true },
+      orderBy: { name: 'asc' },
+    });
+    return departments;
   }
 }

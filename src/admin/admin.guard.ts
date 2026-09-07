@@ -1,19 +1,23 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+} from '@nestjs/common';
 import { AuthUser } from '../auth/auth.service';
 
+/**
+ * Guard that ensures the authenticated user is a SYSTEM_ADMIN
+ * within their company. Applied to admin-only routes.
+ */
 @Injectable()
 export class AdminGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
-
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const user: AuthUser = request.user;
-
-    if (!user || user.platformRole !== 'SYSTEM_ADMIN') {
-      throw new ForbiddenException('System administrator access required');
+    const req = context.switchToHttp().getRequest();
+    const user: AuthUser = req.user;
+    if (!user || user.role !== 'SYSTEM_ADMIN') {
+      throw new ForbiddenException('Admin access required');
     }
-
     return true;
   }
 }

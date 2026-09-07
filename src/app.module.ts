@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { PrismaService } from './prisma.service';
+import { ScopedPrismaService } from './scoped-prisma.service';
+import { AdminPrismaService } from './admin-prisma.service';
 import { AuthModule } from './auth/auth.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { RequestsModule } from './requests/requests.module';
@@ -35,9 +36,11 @@ import { AppController } from './app.controller';
   ],
   controllers: [AppController],
   providers: [
-    PrismaService,
+    ScopedPrismaService,
+    AdminPrismaService,
     { provide: APP_FILTER, useClass: InfraExceptionFilter },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
+  exports: [ScopedPrismaService, AdminPrismaService],
 })
 export class AppModule {}

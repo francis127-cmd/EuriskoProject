@@ -1,105 +1,81 @@
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import 'dotenv/config';
+import { execSync } from 'child_process';
+import { PrismaClient } from '@prisma/client';
 
-function run(cmd) {
+async function main() {
+  console.log('[start.js] Running startup tasks...');
+
+  // Step 1: Ensure required columns exist (idempotent)
+  console.log('[start.js] Ensuring required columns...');
+  const client = new PrismaClient();
   try {
-    return execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 120000 });
+    await client.$executeRawUnsafe(`
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "domain" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "ssoProvider" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "googleClientId" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "authMode" TEXT NOT NULL DEFAULT 'PASSWORD';
+      ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordHash" TEXT;
+    `);
+    console.log('[start.js] Columns ensured.');
+
+    // Make ssoSubject nullable if it was NOT NULL
+    await client.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "User" ALTER COLUMN "ssoSubject" DROP NOT NULL;
+      EXCEPTION WHEN others THEN null;
+      END $$;
+    `);
+
+    // Drop old unique indexes that conflict with the new schema
+    await client.$executeRawUnsafe(`
+      DROP INDEX IF EXISTS "User_companyId_ssoSubject_key";
+    `);
   } catch (e) {
-    return (e.stdout || '') + '\n' + (e.stderr || '');
+    console.warn('[start.js] Column setup warning:', (e as Error).message);
+  } finally {
+    await client.$disconnect();
   }
+
+  // Step 2: Clean up stuck migrations
+  console.log('[start.js] Cleaning up stuck migrations...');
+  try {
+    const stuckClient = new PrismaClient();
+    await stuckClient.$executeRawUnsafe(`
+      DELETE FROM "_prisma_migrations"
+      WHERE "migration_name" = '20260905180000_add_multi_tenancy'
+        AND "finished_at" IS NULL;
+    `);
+    console.log('[start.js] Stuck migrations cleaned.');
+    await stuckClient.$disconnect();
+  } catch (e) {
+    console.warn('[start.js] Stuck migration cleanup warning:', (e as Error).message);
+  }
+
+  // Step 3: Run Prisma migrations
+  console.log('[start.js] Running prisma migrate deploy...');
+  try {
+    execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+    console.log('[start.js] Migrations applied.');
+  } catch (e) {
+    console.error('[start.js] Migration failed:', (e as Error).message);
+    // Don't exit — the app might still work with existing schema
+  }
+
+  // Step 4: Generate Prisma Client
+  console.log('[start.js] Running prisma generate...');
+  try {
+    execSync('npx prisma generate', { stdio: 'inherit' });
+    console.log('[start.js] Prisma client generated.');
+  } catch (e) {
+    console.error('[start.js] Generate failed:', (e as Error).message);
+  }
+
+  // Step 5: Start the application
+  console.log('[start.js] Starting NestJS application...');
+  require('./dist/main');
 }
 
-console.log('=== Step 0: Ensure required columns exist ===');
-const ensureColumnsSql = `
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Company' AND column_name = 'domain') THEN
-    ALTER TABLE "Company" ADD COLUMN "domain" TEXT;
-    CREATE UNIQUE INDEX IF NOT EXISTS "Company_domain_key" ON "Company"("domain");
-    CREATE INDEX IF NOT EXISTS "Company_domain_idx" ON "Company"("domain");
-    RAISE NOTICE 'Added domain column to Company';
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Company' AND column_name = 'ssoProvider') THEN
-    ALTER TABLE "Company" ADD COLUMN "ssoProvider" TEXT DEFAULT 'GOOGLE';
-    RAISE NOTICE 'Added ssoProvider column to Company';
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Company' AND column_name = 'googleClientId') THEN
-    ALTER TABLE "Company" ADD COLUMN "googleClientId" TEXT;
-    RAISE NOTICE 'Added googleClientId column to Company';
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Company' AND column_name = 'authMode') THEN
-    ALTER TABLE "Company" ADD COLUMN "authMode" TEXT DEFAULT 'PASSWORD';
-    RAISE NOTICE 'Added authMode column to Company';
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'User' AND column_name = 'passwordHash') THEN
-    ALTER TABLE "User" ADD COLUMN "passwordHash" TEXT;
-    RAISE NOTICE 'Added passwordHash column to User';
-  END IF;
-
-  -- Make ssoSubject nullable for password-based users
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'User' AND column_name = 'ssoSubject' AND is_nullable = 'NO') THEN
-    ALTER TABLE "User" ALTER COLUMN "ssoSubject" DROP NOT NULL;
-    RAISE NOTICE 'Made ssoSubject nullable';
-  END IF;
-
-  -- Drop old unique index on [companyId, ssoSubject] if it exists
-  DROP INDEX IF EXISTS "User_companyId_ssoSubject_key";
-
-  IF NOT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Invitation') THEN
-    CREATE TABLE "Invitation" (
-      "id" TEXT NOT NULL,
-      "companyId" TEXT NOT NULL,
-      "email" TEXT NOT NULL,
-      "platformRole" "PlatformRole" NOT NULL DEFAULT 'EMPLOYEE',
-      "departmentCode" TEXT,
-      "departmentRole" "DepartmentRole",
-      "token" TEXT NOT NULL,
-      "expiresAt" TIMESTAMP(3) NOT NULL,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT "Invitation_pkey" PRIMARY KEY ("id")
-    );
-    CREATE UNIQUE INDEX "Invitation_token_key" ON "Invitation"("token");
-    CREATE UNIQUE INDEX "Invitation_companyId_email_key" ON "Invitation"("companyId", "email");
-    CREATE INDEX "Invitation_token_idx" ON "Invitation"("token");
-    ALTER TABLE "Invitation" ADD CONSTRAINT "Invitation_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-    RAISE NOTICE 'Created Invitation table';
-  END IF;
-END $$;
-`;
-const colSqlPath = path.join(process.cwd(), 'ensure_columns.sql');
-fs.writeFileSync(colSqlPath, ensureColumnsSql);
-console.log(run(`npx prisma db execute --file ${colSqlPath}`));
-try { fs.unlinkSync(colSqlPath); } catch {}
-
-console.log('=== Step 1: Clear stuck migration records ===');
-const clearSql = `DELETE FROM "_prisma_migrations" WHERE "applied_at" IS NULL;`;
-const clearSqlPath = path.join(process.cwd(), 'clear_stuck.sql');
-fs.writeFileSync(clearSqlPath, clearSql);
-console.log(run(`npx prisma db execute --file ${clearSqlPath}`));
-try { fs.unlinkSync(clearSqlPath); } catch {}
-
-console.log('=== Step 2: Running prisma migrate deploy ===');
-let out = run('npx prisma migrate deploy');
-console.log(out);
-
-if (out.includes('P3009')) {
-  console.log('=== P3009 persists — trying full cleanup ===');
-  const deepClean = `DELETE FROM "_prisma_migrations" WHERE "finished_at" IS NULL;`;
-  const deepCleanPath = path.join(process.cwd(), 'deep_clean.sql');
-  fs.writeFileSync(deepCleanPath, deepClean);
-  console.log(run(`npx prisma db execute --file ${deepCleanPath}`));
-  try { fs.unlinkSync(deepCleanPath); } catch {}
-  out = run('npx prisma migrate deploy');
-  console.log(out);
-}
-
-console.log('=== Seeding ===');
-console.log(run('npx tsx prisma/seed.ts'));
-
-console.log('=== Starting server ===');
-execSync('node dist/src/main.js', { stdio: 'inherit' });
+main().catch((e) => {
+  console.error('[start.js] Fatal error:', e);
+  process.exit(1);
+});

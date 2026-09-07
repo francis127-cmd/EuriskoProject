@@ -4,28 +4,25 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-// ─── Platform roles ────────────────────────────────────────────────
 enum PlatformRole {
   EMPLOYEE
   SYSTEM_ADMIN
 }
 
-// ─── Department membership roles ───────────────────────────────────
 enum DepartmentRole {
   AGENT
   MANAGER
 }
 
-// ─── Request priority ──────────────────────────────────────────────
 enum Priority {
   LOW
   STANDARD
   URGENT
 }
 
-// ─── Request status (state machine) ────────────────────────────────
 enum RequestStatus {
   PENDING
   IN_PROGRESS
@@ -34,39 +31,50 @@ enum RequestStatus {
   CANCELLED
 }
 
-// ─── Notification event status ─────────────────────────────────────
-enum EventStatus {
-  PENDING
-  SENT
-  FAILED
+model Company {
+  id             String  @id @default(uuid())
+  name           String
+  slug           String  @unique
+  domain         String?
+  authMode       String  @default("PASSWORD") // PASSWORD or SSO
+  ssoProvider    String?
+  googleClientId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users       User[]
+  departments Department[]
+  invitations Invitation[]
+
+  @@map("Company")
 }
 
-// ─── Users (SSO-backed or password-based) ────────────────────────
 model User {
-  id           String       @id @default(uuid())
-  companyId    String
-  ssoSubject   String?      // null for password-based users
-  passwordHash String?      // null for SSO users
-  displayName  String
-  email        String
-  platformRole PlatformRole @default(EMPLOYEE)
-  active       Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id             String       @id @default(uuid())
+  companyId      String
+  ssoSubject     String?
+  email          String
+  displayName    String
+  passwordHash   String?
+  platformRole   PlatformRole @default(EMPLOYEE)
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  memberships   DepartmentMember[]
-  ownedRequests Request[]           @relation("RequestEmployee")
-  claimedRequests Request[]           @relation("RequestClaimant")
-  uploadedDocs  Document[]
-  auditActions  AuditLog[]
+  company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  memberships     DepartmentMember[]
+  requests        Request[]          @relation("EmployeeRequests")
+  claimedRequests Request[]          @relation("AgentRequests")
+  documents       Document[]
+  auditLogs       AuditLog[]
 
+  @@unique([companyId, ssoSubject])
   @@unique([companyId, email])
   @@index([companyId])
-  @@index([companyId, email])
+  @@index([email])
+  @@map("User")
 }
 
-// ─── Departments ──────────────────────────────────────────────────
 model Department {
   id          String   @id @default(uuid())
   companyId   String
@@ -77,45 +85,38 @@ model Department {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  members      DepartmentMember[]
+  company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   requestTypes RequestType[]
+  members      DepartmentMember[]
   requests     Request[]
 
   @@unique([companyId, code])
-  @@index([companyId, active])
+  @@index([companyId])
+  @@map("Department")
 }
 
-// ─── Companies (multi-tenancy) ────────────────────────────────────
-model Company {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  domain    String?  @unique
-  active    Boolean  @default(true)
+model RequestType {
+  id             String   @id @default(uuid())
+  departmentId   String
+  code           String
+  name           String
+  description    String?
+  defaultPriority Priority @default(STANDARD)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  authMode        String?  @default("PASSWORD")  // "SSO" or "PASSWORD"
-  ssoProvider     String?  @default("GOOGLE")
-  googleClientId  String?
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  requests   Request[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  users       User[]
-  departments Department[]
-  invitations Invitation[]
-
-  @@index([slug])
-  @@index([domain])
+  @@unique([departmentId, code])
+  @@map("RequestType")
 }
 
-// ─── Department membership (agent / manager) ──────────────────────
 model DepartmentMember {
   id             String         @id @default(uuid())
   departmentId   String
   userId         String
   departmentRole DepartmentRole @default(AGENT)
-  active         Boolean        @default(true)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -123,85 +124,62 @@ model DepartmentMember {
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([departmentId, userId])
-  @@index([userId, active])
-  @@index([departmentId, active])
+  @@map("DepartmentMember")
 }
 
-// ─── Request types (catalog entries) ──────────────────────────────
-model RequestType {
-  id              String   @id @default(uuid())
-  departmentId    String
-  code            String
-  name            String
-  description     String?
-  active          Boolean  @default(true)
-  defaultPriority Priority @default(STANDARD)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  requests   Request[]
-
-  @@unique([departmentId, code])
-  @@index([departmentId, active])
-}
-
-// ─── Requests ─────────────────────────────────────────────────────
 model Request {
-  id              String        @id @default(uuid())
-  employeeId      String
-  departmentId    String
-  requestTypeId   String
-  title           String
-  description     String        @default("")
-  priority        Priority      @default(STANDARD)
-  status          RequestStatus @default(PENDING)
-  claimedBy       String?
-  resolutionNote  String?
+  id             String        @id @default(uuid())
+  employeeId     String
+  departmentId   String
+  requestTypeId  String
+  title          String
+  description    String        @default("")
+  priority       Priority      @default(STANDARD)
+  status         RequestStatus @default(PENDING)
+  claimedBy      String?
+  resolutionNote String?
   rejectionReason String?
-  completedAt     DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  completedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  employee    User          @relation("RequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  department  Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  requestType RequestType   @relation(fields: [requestTypeId], references: [id], onDelete: Cascade)
-  claimant    User?         @relation("RequestClaimant", fields: [claimedBy], references: [id], onDelete: SetNull)
+  employee    User        @relation("EmployeeRequests", fields: [employeeId], references: [id])
+  department  Department  @relation(fields: [departmentId], references: [id])
+  requestType RequestType @relation(fields: [requestTypeId], references: [id])
+  agent       User?       @relation("AgentRequests", fields: [claimedBy], references: [id])
   documents   Document[]
   auditLogs   AuditLog[]
-  events      NotificationEvent[]
 
-  @@index([employeeId, createdAt(sort: Desc)])
-  @@index([departmentId, status, priority, createdAt])
+  @@index([employeeId])
+  @@index([departmentId])
+  @@index([claimedBy])
   @@index([status])
+  @@map("Request")
 }
 
-// ─── Documents (metadata — payload in object storage) ─────────────
 model Document {
-  id               String    @id @default(uuid())
+  id               String   @id @default(uuid())
   requestId        String
-  storageKey       String    @unique
+  storageKey       String
   originalFilename String
   mimeType         String
   byteSize         Int
   checksum         String
   uploadedBy       String
+  purgeAt          DateTime
   deletedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  purgeAt          DateTime?
+  createdAt        DateTime @default(now())
 
-  request  Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  uploader User    @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+  request  Request @relation(fields: [requestId], references: [id])
+  uploader User    @relation(fields: [uploadedBy], references: [id])
 
   @@index([requestId])
-  @@index([purgeAt, deletedAt])
-  @@index([storageKey])
+  @@map("Document")
 }
 
-// ─── Audit logs (append-only) ─────────────────────────────────────
 model AuditLog {
   id        String   @id @default(uuid())
-  requestId String?
+  requestId String
   actorId   String
   action    String
   oldValue  String?
@@ -209,44 +187,28 @@ model AuditLog {
   metadata  Json?
   createdAt DateTime @default(now())
 
-  request Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  actor   User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  request Request @relation(fields: [requestId], references: [id])
+  actor   User    @relation(fields: [actorId], references: [id])
 
-  @@index([requestId, createdAt])
-  @@index([actorId])
-  @@index([action])
-}
-
-// ─── Notification events (outbox pattern) ─────────────────────────
-model NotificationEvent {
-  id        String      @id @default(uuid())
-  requestId String
-  eventType String
-  payload   Json
-  status    EventStatus @default(PENDING)
-  createdAt DateTime    @default(now())
-  sentAt    DateTime?
-
-  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
-
-  @@index([status, createdAt])
   @@index([requestId])
+  @@index([actorId])
+  @@map("AuditLog")
 }
 
-// ─── Invitations ──────────────────────────────────────────────────
 model Invitation {
-  id             String          @id @default(uuid())
+  id             String         @id @default(uuid())
   companyId      String
   email          String
-  platformRole   PlatformRole    @default(EMPLOYEE)
+  platformRole   PlatformRole   @default(EMPLOYEE)
   departmentCode String?
   departmentRole DepartmentRole?
-  token          String          @unique
+  token          String
   expiresAt      DateTime
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime       @default(now())
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, email])
   @@index([token])
+  @@map("Invitation")
 }

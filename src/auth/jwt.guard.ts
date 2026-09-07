@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { AuthService, AuthUser } from './auth.service';
+import { TenantContext } from '../tenant-context';
 
 @Injectable()
 export class JwtGuard implements CanActivate {
@@ -10,7 +11,14 @@ export class JwtGuard implements CanActivate {
     const auth = req.headers['authorization'];
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
     const token = auth.slice(7);
-    req.user = await this.authService.verifyToken(token);
-    return true;
+    const user = await this.authService.verifyToken(token);
+    req.user = user;
+
+    const existing = TenantContext.getStore();
+    return new Promise<boolean>((resolve) => {
+      TenantContext.run({ ...existing, companyId: user.companyId }, () => {
+        resolve(true);
+      });
+    });
   }
 }

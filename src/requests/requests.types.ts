@@ -1,46 +1,37 @@
-import { IsString, IsOptional, IsEnum, IsNotEmpty, MinLength, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateRequestDto {
   @IsString()
   @IsNotEmpty()
-  departmentCode!: string;
+  departmentCode: string;
 
   @IsString()
   @IsNotEmpty()
-  requestTypeCode!: string;
+  requestTypeCode: string;
 
   @IsString()
-  @MinLength(3)
-  @MaxLength(200)
-  title!: string;
+  @IsNotEmpty()
+  title: string;
 
-  @IsString()
-  @MaxLength(5000)
   @IsOptional()
+  @IsString()
   description?: string;
 
-  @IsEnum(['LOW', 'STANDARD', 'URGENT'] as const)
   @IsOptional()
-  priority?: 'LOW' | 'STANDARD' | 'URGENT';
+  @IsString()
+  priority?: string;
 }
 
 export class UpdateRequestStatusDto {
-  @IsEnum(['IN_PROGRESS', 'COMPLETED', 'REJECTED', 'CANCELLED'] as const)
-  status!: 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED' | 'CANCELLED';
-
   @IsString()
-  @MaxLength(5000)
+  @IsNotEmpty()
+  status: string;
+
   @IsOptional()
+  @IsString()
   resolutionNote?: string;
 
-  @IsString()
-  @MaxLength(5000)
   @IsOptional()
+  @IsString()
   rejectionReason?: string;
-}
-
-export class ClaimRequestDto {
-  @IsOptional()
-  @IsString()
-  requestId?: string;
 }

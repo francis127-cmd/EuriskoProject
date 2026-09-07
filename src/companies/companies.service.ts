@@ -1,235 +1,111 @@
-import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma.service';
-import { PlatformRole, Priority } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
-
-export const DEFAULT_DEPARTMENTS = [
-  {
-    code: 'HR',
-    name: 'Human Resources',
-    description: 'Employment verification, payroll, benefits, onboarding, workplace policies',
-    requestTypes: [
-      { code: 'EMP_VERIFICATION', name: 'Employment Verification Letter', description: 'Request official employment verification', defaultPriority: Priority.STANDARD },
-      { code: 'PAYROLL', name: 'Payroll & Payslip Questions', description: 'Questions about salary, payslips, or tax deductions', defaultPriority: Priority.STANDARD },
-      { code: 'BENEFITS', name: 'Benefits & Insurance', description: 'Health insurance, retirement plans, and employee benefits', defaultPriority: Priority.STANDARD },
-      { code: 'ONBOARDING', name: 'Onboarding & Offboarding', description: 'New hire setup or exit procedures', defaultPriority: Priority.URGENT },
-      { code: 'WORKPLACE_POLICY', name: 'Workplace Policy Questions', description: 'Questions about company policies and procedures', defaultPriority: Priority.LOW },
-    ],
-  },
-  {
-    code: 'IT',
-    name: 'IT & Technical Support',
-    description: 'Hardware, software, accounts, email, VPN, equipment',
-    requestTypes: [
-      { code: 'LAPTOP', name: 'Laptop/Desktop Problem', description: 'Hardware issues with laptop or desktop', defaultPriority: Priority.URGENT },
-      { code: 'SOFTWARE', name: 'Software Installation/Update', description: 'Install or update software applications', defaultPriority: Priority.STANDARD },
-      { code: 'ACCOUNT', name: 'Account or Password Access', description: 'Reset password or regain account access', defaultPriority: Priority.URGENT },
-      { code: 'EMAIL', name: 'Email or Calendar Problem', description: 'Issues with email or calendar applications', defaultPriority: Priority.STANDARD },
-      { code: 'VPN', name: 'VPN or Network Access', description: 'VPN setup or network connectivity issues', defaultPriority: Priority.URGENT },
-      { code: 'EQUIPMENT', name: 'Equipment Request/Replacement', description: 'Request new or replacement hardware', defaultPriority: Priority.STANDARD },
-    ],
-  },
-  {
-    code: 'FAC',
-    name: 'Facilities & Workplace',
-    description: 'Repairs, desks, meeting rooms, badges, supplies',
-    requestTypes: [
-      { code: 'REPAIR', name: 'Office Repair/Maintenance', description: 'Report maintenance issues in the office', defaultPriority: Priority.URGENT },
-      { code: 'DESK', name: 'Desk or Meeting Room Problem', description: 'Issues with desk or meeting room setup', defaultPriority: Priority.STANDARD },
-      { code: 'BADGE', name: 'Access Badge/Building Access', description: 'Badge replacement or building access issues', defaultPriority: Priority.URGENT },
-      { code: 'SUPPLIES', name: 'Office Supplies', description: 'Request office supplies', defaultPriority: Priority.LOW },
-      { code: 'WORKSPACE', name: 'Workspace Move/Setup', description: 'Request workspace relocation or setup', defaultPriority: Priority.STANDARD },
-    ],
-  },
-  {
-    code: 'FIN',
-    name: 'Finance',
-    description: 'Expenses, invoices, payments, budget',
-    requestTypes: [
-      { code: 'EXPENSE', name: 'Expense Reimbursement', description: 'Submit expense report for reimbursement', defaultPriority: Priority.STANDARD },
-      { code: 'INVOICE', name: 'Invoice or Vendor Question', description: 'Questions about invoices or vendor payments', defaultPriority: Priority.STANDARD },
-      { code: 'PAYMENT', name: 'Payment/Banking Question', description: 'Questions about payment processing', defaultPriority: Priority.STANDARD },
-      { code: 'BUDGET', name: 'Budget Clarification', description: 'Questions about budget allocations', defaultPriority: Priority.LOW },
-    ],
-  },
-  {
-    code: 'PEO',
-    name: 'People Operations',
-    description: 'Training, performance, wellbeing, workplace experience',
-    requestTypes: [
-      { code: 'TRAINING', name: 'Training Request', description: 'Request training or professional development', defaultPriority: Priority.STANDARD },
-      { code: 'PERFORMANCE', name: 'Performance Support', description: 'Support for performance-related matters', defaultPriority: Priority.STANDARD },
-      { code: 'WELLBEING', name: 'Employee Wellbeing', description: 'Wellbeing support and resources', defaultPriority: Priority.URGENT },
-      { code: 'FEEDBACK', name: 'Workplace Experience Feedback', description: 'Feedback about workplace experience', defaultPriority: Priority.LOW },
-    ],
-  },
-];
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { AdminPrismaService } from '../admin-prisma.service';
 
 @Injectable()
 export class CompaniesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CompaniesService.name);
 
-  async registerCompany(dto: {
+  constructor(private readonly prisma: AdminPrismaService) {}
+
+  async registerCompany(data: {
     name: string;
     slug: string;
-    domain: string;
-    adminEmail: string;
-    adminName: string;
-    adminPassword?: string;
+    domain?: string;
+    authMode?: string;
     googleClientId?: string;
+    adminEmail: string;
+    adminPassword: string;
   }) {
-    const slug = dto.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
-    const domain = dto.domain.toLowerCase().trim();
-    const adminEmail = dto.adminEmail.toLowerCase().trim();
-
-    if (!slug) throw new BadRequestException('Invalid slug');
-    if (!domain) throw new BadRequestException('Invalid domain');
-    if (!adminEmail) throw new BadRequestException('Invalid admin email');
-
-    if (!adminEmail.endsWith(`@${domain}`)) {
-      throw new BadRequestException('Admin email must match company domain');
+    const existing = await this.prisma.company.findUnique({ where: { slug: data.slug } });
+    if (existing) {
+      throw new BadRequestException('Company slug already taken');
     }
 
-    const existingSlug = await this.prisma.company.findUnique({ where: { slug } });
-    if (existingSlug) {
-      throw new ConflictException(`Company with slug '${slug}' already exists`);
-    }
-
-    const existingDomain = await this.prisma.company.findUnique({ where: { domain } });
-    if (existingDomain) {
-      throw new ConflictException(`Company with domain '${domain}' already exists`);
-    }
-
-    const existingUser = await this.prisma.user.findFirst({ where: { email: adminEmail } });
-    if (existingUser) {
-      throw new ConflictException(`User with email '${adminEmail}' is already registered with another company`);
-    }
-
-    // Determine auth mode: SSO if googleClientId provided, PASSWORD otherwise
-    const authMode = dto.googleClientId ? 'SSO' : 'PASSWORD';
-    const passwordHash = authMode === 'PASSWORD' && dto.adminPassword
-      ? await bcrypt.hash(dto.adminPassword, 12)
-      : null;
-
-    if (authMode === 'PASSWORD' && !dto.adminPassword) {
-      throw new BadRequestException('Admin password is required for password-based companies');
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const company = await tx.company.create({
-        data: {
-          name: dto.name.trim(),
-          slug,
-          domain,
-          authMode,
-          ssoProvider: authMode === 'SSO' ? 'GOOGLE' : null,
-          googleClientId: dto.googleClientId || null,
-        },
-      });
-
-      // 2. Create Default Departments and Request Types
-      for (const dept of DEFAULT_DEPARTMENTS) {
-        await tx.department.create({
-          data: {
-            companyId: company.id,
-            code: dept.code,
-            name: dept.name,
-            description: dept.description,
-            requestTypes: {
-              create: dept.requestTypes.map((rt) => ({
-                code: rt.code,
-                name: rt.name,
-                description: rt.description,
-                defaultPriority: rt.defaultPriority,
-              })),
-            },
-          },
-        });
-      }
-
-      // 3. Create Company Admin User
-      const admin = await tx.user.create({
-        data: {
-          companyId: company.id,
-          ssoSubject: authMode === 'SSO' ? adminEmail : null,
-          passwordHash,
-          email: adminEmail,
-          displayName: dto.adminName.trim() || adminEmail.split('@')[0],
-          platformRole: PlatformRole.SYSTEM_ADMIN,
-        },
-      });
-
-      return {
-        success: true,
-        company: {
-          id: company.id,
-          name: company.name,
-          slug: company.slug,
-          authMode,
-        },
-        admin: {
-          id: admin.id,
-          email: admin.email,
-          displayName: admin.displayName,
-          platformRole: admin.platformRole,
-        },
-        message: `Company '${company.name}' (${authMode} mode) registered! Admin '${admin.email}' can now sign in.`,
-      };
+    const company = await this.prisma.company.create({
+      data: {
+        name: data.name,
+        slug: data.slug,
+        domain: data.domain,
+        authMode: data.authMode || 'PASSWORD',
+        googleClientId: data.googleClientId,
+      },
     });
-  }
 
-  async listCompanies() {
-    return this.prisma.company.findMany({
-      where: { active: true },
-      select: { id: true, name: true, slug: true, createdAt: true },
-      orderBy: { name: 'asc' },
-    });
+    this.logger.log(`Company registered: ${company.name} (${company.slug})`);
+
+    return {
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+    };
   }
 
   async getCompanyById(id: string) {
-    return this.prisma.company.findUnique({
-      where: { id },
-      select: { id: true, name: true, slug: true, domain: true, authMode: true, ssoProvider: true, googleClientId: true, createdAt: true },
-    });
-  }
-
-  async getCompanyBySlug(slug: string) {
-    return this.prisma.company.findUnique({
-      where: { slug },
-      select: { id: true, name: true, slug: true, active: true },
-    });
-  }
-
-  async updateCompany(id: string, name: string) {
-    return this.prisma.company.update({
-      where: { id },
-      data: { name: name.trim() },
-      select: { id: true, name: true, slug: true },
-    });
-  }
-
-  async updateCompanySso(id: string, dto: { googleClientId?: string; domain?: string; authMode?: string }) {
-    const data: any = {};
-    if (dto.googleClientId !== undefined) data.googleClientId = dto.googleClientId || null;
-    if (dto.authMode !== undefined) {
-      if (!['SSO', 'PASSWORD'].includes(dto.authMode)) {
-        throw new BadRequestException('authMode must be SSO or PASSWORD');
-      }
-      data.authMode = dto.authMode;
-      if (dto.authMode === 'SSO') data.ssoProvider = 'GOOGLE';
+    const company = await this.prisma.company.findUnique({ where: { id } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
     }
-    if (dto.domain !== undefined) {
-      const domain = dto.domain.toLowerCase().trim();
-      if (domain) {
-        const existing = await this.prisma.company.findFirst({ where: { domain, NOT: { id } } });
-        if (existing) throw new ConflictException(`Domain '${domain}' is already used by another company`);
-      }
-      data.domain = domain || null;
+    return company;
+  }
+
+  async getCompanySettings(id: string) {
+    const company = await this.prisma.company.findUnique({ where: { id } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
     }
-    return this.prisma.company.update({
-      where: { id },
-      data,
-      select: { id: true, name: true, slug: true, domain: true, authMode: true, ssoProvider: true, googleClientId: true },
+    return {
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+      domain: company.domain || '',
+      authMode: company.authMode,
+      ssoProvider: company.ssoProvider || '',
+      googleClientId: company.googleClientId || '',
+    };
+  }
+
+  async updateCompanySso(
+    companyId: string,
+    dto: { domain?: string; googleClientId?: string; authMode?: string },
+  ) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    const updated = await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        ...(dto.domain !== undefined && { domain: dto.domain }),
+        ...(dto.googleClientId !== undefined && { googleClientId: dto.googleClientId }),
+        ...(dto.authMode !== undefined && { authMode: dto.authMode }),
+      },
     });
+
+    this.logger.log(`Company SSO config updated: ${updated.slug}`);
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      domain: updated.domain || '',
+      authMode: updated.authMode,
+      ssoProvider: updated.ssoProvider || '',
+      googleClientId: updated.googleClientId || '',
+    };
+  }
+
+  async updateCompany(companyId: string, name: string) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    const updated = await this.prisma.company.update({
+      where: { id: companyId },
+      data: { name },
+    });
+
+    return { id: updated.id, name: updated.name, slug: updated.slug };
   }
 }

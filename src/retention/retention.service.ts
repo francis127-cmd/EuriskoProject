@@ -1,14 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../prisma.service';
+import { AdminPrismaService } from '../admin-prisma.service';
 import { S3Service } from '../documents/s3.service';
 
+/**
+ * Document retention service — operates across ALL companies.
+ * Uses AdminPrismaService (no tenant scoping) because this is a
+ * system-level cron job that must process documents from every tenant.
+ */
 @Injectable()
 export class RetentionService {
   private readonly logger = new Logger(RetentionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly prisma: AdminPrismaService,
     private readonly s3: S3Service,
   ) {}
 
@@ -17,10 +22,7 @@ export class RetentionService {
     this.logger.log('Starting document purge job...');
 
     const expired = await this.prisma.document.findMany({
-      where: {
-        purgeAt: { lte: new Date() },
-        deletedAt: null,
-      },
+      where: { purgeAt: { lte: new Date() }, deletedAt: null },
     });
 
     this.logger.log(`Found ${expired.length} documents past retention period`);
@@ -41,7 +43,6 @@ export class RetentionService {
             actorId: 'system',
             action: 'DOCUMENT_PURGED',
             oldValue: doc.storageKey,
-            newValue: null,
             metadata: { reason: 'retention_policy', byteSize: doc.byteSize },
           },
         });
