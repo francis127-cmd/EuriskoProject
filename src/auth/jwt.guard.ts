@@ -29,11 +29,13 @@ export class JwtGuard implements CanActivate {
     const user = await this.authService.verifyToken(token);
     req.user = user;
 
-    const existing = TenantContext.getStore();
-    return new Promise<boolean>((resolve) => {
-      TenantContext.run({ ...existing, companyId: user.companyId }, () => {
-        resolve(true);
-      });
+    // `run()` ends when the guard callback returns, before the controller is
+    // invoked. `enterWith()` keeps the authenticated tenant in the request's
+    // AsyncLocalStorage chain for every downstream service and Prisma query.
+    TenantContext.enterWith({
+      ...TenantContext.getStore(),
+      companyId: user.companyId,
     });
+    return true;
   }
 }

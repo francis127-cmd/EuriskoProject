@@ -61,10 +61,13 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
               return query(args);
             }
 
+            const withTenant = (where: any, tenantWhere: any) =>
+              where ? { AND: [where, tenantWhere] } : tenantWhere;
+
             // Direct companyId models: User, Department, Invitation
             if (DIRECT_TENANT_MODELS.has(model)) {
               if (['findMany', 'findFirst', 'count', 'aggregate'].includes(operation)) {
-                args.where = { ...args.where, companyId: cid };
+                args.where = withTenant(args.where, { companyId: cid });
                 return query(args);
               }
 
@@ -86,7 +89,10 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
               }
 
               if (['update', 'updateMany', 'delete', 'deleteMany', 'upsert'].includes(operation)) {
-                args.where = { ...args.where, companyId: cid };
+                args.where = withTenant(args.where, { companyId: cid });
+                if (operation === 'upsert' && args.create && !args.create.companyId) {
+                  args.create = { ...args.create, companyId: cid };
+                }
                 return query(args);
               }
             }
@@ -95,26 +101,38 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
             if (RELATIONAL_TENANT_MODELS.has(model)) {
               if (model === 'Request') {
                 if (['findMany', 'findFirst', 'count', 'aggregate'].includes(operation)) {
-                  args.where = { ...args.where, department: { companyId: cid } };
+                  args.where = withTenant(args.where, { department: { companyId: cid } });
                   return query(args);
                 }
                 if (['update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
-                  args.where = { ...args.where, department: { companyId: cid } };
+                  args.where = withTenant(args.where, { department: { companyId: cid } });
                   return query(args);
+                }
+                if (operation === 'create' && args.data?.departmentId) {
+                  const department = await base.department.findFirst({ where: { id: args.data.departmentId, companyId: cid }, select: { id: true } });
+                  if (!department) throw new Error('Tenant isolation violation: invalid department');
                 }
               }
 
               if (model === 'Document') {
                 if (['findMany', 'findFirst', 'count', 'aggregate', 'update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
-                  args.where = { ...args.where, request: { department: { companyId: cid } } };
+                  args.where = withTenant(args.where, { request: { department: { companyId: cid } } });
                   return query(args);
+                }
+                if (operation === 'create' && args.data?.requestId) {
+                  const request = await base.request.findFirst({ where: { id: args.data.requestId, department: { companyId: cid } }, select: { id: true } });
+                  if (!request) throw new Error('Tenant isolation violation: invalid request');
                 }
               }
 
               if (model === 'DepartmentMember' || model === 'RequestType') {
                 if (['findMany', 'findFirst', 'count', 'aggregate', 'update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
-                  args.where = { ...args.where, department: { companyId: cid } };
+                  args.where = withTenant(args.where, { department: { companyId: cid } });
                   return query(args);
+                }
+                if (operation === 'create' && args.data?.departmentId) {
+                  const department = await base.department.findFirst({ where: { id: args.data.departmentId, companyId: cid }, select: { id: true } });
+                  if (!department) throw new Error('Tenant isolation violation: invalid department');
                 }
               }
             }
