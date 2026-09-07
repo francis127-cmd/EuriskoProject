@@ -93,7 +93,7 @@ export class CompaniesService {
     }
 
     if (data.domain) {
-      const existingDomain = await this.prisma.company.findUnique({ where: { domain: data.domain } });
+      const existingDomain = await this.prisma.company.findFirst({ where: { domain: data.domain } });
       if (existingDomain) {
         throw new ConflictException(`Company with domain '${data.domain}' already exists`);
       }

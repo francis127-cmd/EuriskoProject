@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { ScopedPrismaService } from '../scoped-prisma.service';
 import { DepartmentsService } from '../departments/departments.service';
 import { AuthUser } from '../auth/auth.service';
@@ -156,7 +156,7 @@ export class RequestsService {
         requestId: id,
         actorId: user.sub,
         action: 'REQUEST_CLAIMED',
-        newValue: user.displayName || user.name || user.sub,
+        newValue: user.name || user.sub,
       },
     });
 

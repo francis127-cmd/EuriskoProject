@@ -141,7 +141,7 @@ export class AuthService {
   }
 
   async acceptInvite(token: string, password: string) {
-    const invitation = await this.prisma.invitation.findUnique({ where: { token } });
+    const invitation = await this.prisma.invitation.findFirst({ where: { token } });
     if (!invitation) {
       throw new BadRequestException('Invalid invitation token');
     }
@@ -192,9 +192,8 @@ export class AuthService {
   }
 
   async validateInviteToken(token: string) {
-    const invitation = await this.prisma.invitation.findUnique({
+    const invitation = await this.prisma.invitation.findFirst({
       where: { token },
-      include: { company: { select: { name: true, slug: true } } },
     });
     if (!invitation) {
       throw new BadRequestException('Invalid invitation token');
@@ -202,12 +201,13 @@ export class AuthService {
     if (invitation.expiresAt < new Date()) {
       throw new BadRequestException('Invitation has expired');
     }
+    const company = await this.prisma.company.findUnique({ where: { id: invitation.companyId } });
     return {
       email: invitation.email,
       role: invitation.platformRole,
       department: invitation.departmentCode,
-      companyName: invitation.company.name,
-      companySlug: invitation.company.slug,
+      companyName: company?.name || 'Unknown',
+      companySlug: company?.slug || 'unknown',
       expiresAt: invitation.expiresAt.toISOString(),
     };
   }
