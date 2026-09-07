@@ -41,6 +41,15 @@ BEGIN
     RAISE NOTICE 'Added passwordHash column to User';
   END IF;
 
+  -- Make ssoSubject nullable for password-based users
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'User' AND column_name = 'ssoSubject' AND is_nullable = 'NO') THEN
+    ALTER TABLE "User" ALTER COLUMN "ssoSubject" DROP NOT NULL;
+    RAISE NOTICE 'Made ssoSubject nullable';
+  END IF;
+
+  -- Drop old unique index on [companyId, ssoSubject] if it exists
+  DROP INDEX IF EXISTS "User_companyId_ssoSubject_key";
+
   IF NOT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Invitation') THEN
     CREATE TABLE "Invitation" (
       "id" TEXT NOT NULL,
