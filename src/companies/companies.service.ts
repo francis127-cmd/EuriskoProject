@@ -92,13 +92,6 @@ export class CompaniesService {
       throw new ConflictException('Company slug already taken');
     }
 
-    if (data.domain) {
-      const existingDomain = await this.prisma.company.findFirst({ where: { domain: data.domain } });
-      if (existingDomain) {
-        throw new ConflictException(`Company with domain '${data.domain}' already exists`);
-      }
-    }
-
     const existingUser = await this.prisma.user.findFirst({ where: { email: adminEmail } });
     if (existingUser) {
       throw new ConflictException('Admin email is already registered with an existing account');
@@ -112,7 +105,7 @@ export class CompaniesService {
         data: {
           name: data.name.trim(),
           slug,
-          domain: data.domain || adminEmail.split('@')[1],
+          domain: data.domain || null,
           authMode: data.authMode || (data.adminPassword ? 'PASSWORD' : 'SSO'),
           googleClientId: data.googleClientId || null,
         },
