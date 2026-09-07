@@ -31,21 +31,30 @@ enum RequestStatus {
 }
 
 model Company {
-  id             String  @id @default(uuid())
-  name           String
-  slug           String  @unique
-  domain         String?
-  authMode       String  @default("PASSWORD") // PASSWORD or SSO
-  ssoProvider    String?
-  googleClientId String?
-  mfaRequired    Boolean @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                    String  @id @default(uuid())
+  name                  String
+  slug                  String  @unique
+  domain                String?
+  authMode              String  @default("PASSWORD") // PASSWORD, SSO, OIDC, SAML
+  ssoProvider           String?
+  googleClientId        String?
+  mfaRequired           Boolean @default(false)
+  refreshTokenExpiryDays Int     @default(7)
+  oidcClientId          String?
+  oidcClientSecret      String?
+  oidcDiscoveryUrl      String?
+  oidcIssuer            String?
+  samlMetadataUrl       String?
+  samlCertificate       String?
+  samlCallbackUrl       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   users       User[]
   departments Department[]
   invitations Invitation[]
   domainVerifications DomainVerification[]
+  oidcProviders OidcProvider[]
 
   @@map("Company")
 }
@@ -265,4 +274,25 @@ model DomainVerification {
   @@unique([companyId, domain])
   @@index([token])
   @@map("DomainVerification")
+}
+
+model OidcProvider {
+  id              String   @id @default(uuid())
+  companyId       String
+  name            String
+  issuer          String
+  clientId        String
+  clientSecret    String
+  discoveryUrl    String
+  redirectUri     String
+  scopes          String   @default("openid email profile")
+  iconUrl         String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name])
+  @@map("OidcProvider")
 }

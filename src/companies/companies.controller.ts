@@ -3,7 +3,7 @@ import { CompaniesService } from './companies.service';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { PlatformRole } from '@prisma/client';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength, IsBoolean, IsNumber, Min, Max } from 'class-validator';
 
 class RegisterCompanyDto {
   @IsString()
@@ -52,6 +52,44 @@ class UpdateSsoDto {
   @IsOptional()
   @IsString()
   authMode?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  mfaRequired?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(90)
+  refreshTokenExpiryDays?: number;
+
+  @IsOptional()
+  @IsString()
+  oidcClientId?: string;
+
+  @IsOptional()
+  @IsString()
+  oidcClientSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  oidcDiscoveryUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  oidcIssuer?: string;
+
+  @IsOptional()
+  @IsString()
+  samlMetadataUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  samlCertificate?: string;
+
+  @IsOptional()
+  @IsString()
+  samlCallbackUrl?: string;
 }
 
 @Controller('companies')

@@ -1,11 +1,15 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
 import { ScimService } from './scim.service';
+import { ScimGroupService } from './scim-group.service';
 
 @Controller('scim/v2')
 @Public()
 export class ScimController {
-  constructor(private readonly scimService: ScimService) {}
+  constructor(
+    private readonly scimService: ScimService,
+    private readonly scimGroupService: ScimGroupService,
+  ) {}
 
   @Get('Schemas')
   getSchemas() {
@@ -67,5 +71,52 @@ export class ScimController {
       return { scimType: 'invalidBearer', detail: 'Valid authorization token required' };
     }
     return this.scimService.deleteUser(id, authHeader.slice(7));
+  }
+
+  @Get('Groups')
+  listGroups(@Req() req: any) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader?.startsWith('Bearer ')) {
+      return { scimType: 'invalidBearer', detail: 'Valid authorization token required' };
+    }
+    return this.scimGroupService.listGroups('');
+  }
+
+  @Get('Groups/:id')
+  getGroup(@Param('id') id: string, @Req() req: any) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader?.startsWith('Bearer ')) {
+      return { scimType: 'invalidBearer', detail: 'Valid authorization token required' };
+    }
+    return this.scimGroupService.getGroup(id, '');
+  }
+
+  @Post('Groups')
+  @HttpCode(HttpStatus.CREATED)
+  createGroup(@Body() body: any, @Req() req: any) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader?.startsWith('Bearer ')) {
+      return { scimType: 'invalidBearer', detail: 'Valid authorization token required' };
+    }
+    return this.scimGroupService.createGroup(body, '');
+  }
+
+  @Patch('Groups/:id')
+  updateGroup(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader?.startsWith('Bearer ')) {
+      return { scimType: 'invalidBearer', detail: 'Valid authorization token required' };
+    }
+    return this.scimGroupService.updateGroup(id, body, '');
+  }
+
+  @Delete('Groups/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteGroup(@Param('id') id: string, @Req() req: any) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader?.startsWith('Bearer ')) {
+      return { scimType: 'invalidBearer', detail: 'Valid authorization token required' };
+    }
+    return this.scimGroupService.deleteGroup(id, '');
   }
 }

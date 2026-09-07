@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ScimController } from './scim.controller';
 import { ScimService } from './scim.service';
+import { ScimGroupService } from './scim-group.service';
 import { AdminPrismaService } from '../admin-prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { JwtModule } from '@nestjs/jwt';
+import { RefreshTokenService } from '../auth/refresh-token.service';
+import { MfaService } from '../auth/mfa.service';
 
 @Module({
   imports: [
@@ -14,7 +17,7 @@ import { JwtModule } from '@nestjs/jwt';
     }),
   ],
   controllers: [ScimController],
-  providers: [ScimService, AdminPrismaService, AuthService],
-  exports: [ScimService],
+  providers: [ScimService, ScimGroupService, AdminPrismaService, AuthService, RefreshTokenService, MfaService],
+  exports: [ScimService, ScimGroupService],
 })
 export class ScimModule {}

@@ -100,7 +100,6 @@ export class CompaniesService {
     const passwordHash = data.adminPassword ? await bcrypt.hash(data.adminPassword, 12) : null;
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Create Company
       const company = await tx.company.create({
         data: {
           name: data.name.trim(),
@@ -111,7 +110,6 @@ export class CompaniesService {
         },
       });
 
-      // 2. Provision Default Departments & Request Types
       for (const dept of DEFAULT_DEPARTMENTS) {
         await tx.department.create({
           data: {
@@ -131,7 +129,6 @@ export class CompaniesService {
         });
       }
 
-      // 3. Provision Admin User
       const admin = await tx.user.create({
         data: {
           companyId: company.id,
@@ -185,28 +182,59 @@ export class CompaniesService {
       authMode: company.authMode,
       ssoProvider: company.ssoProvider || '',
       googleClientId: company.googleClientId || '',
+      mfaRequired: company.mfaRequired,
+      refreshTokenExpiryDays: company.refreshTokenExpiryDays,
+      oidcClientId: company.oidcClientId || '',
+      oidcDiscoveryUrl: company.oidcDiscoveryUrl || '',
+      samlMetadataUrl: company.samlMetadataUrl || '',
     };
   }
 
   async updateCompanySso(
     companyId: string,
-    dto: { domain?: string; googleClientId?: string; authMode?: string },
+    dto: {
+      domain?: string;
+      googleClientId?: string;
+      authMode?: string;
+      mfaRequired?: boolean;
+      refreshTokenExpiryDays?: number;
+      oidcClientId?: string;
+      oidcClientSecret?: string;
+      oidcDiscoveryUrl?: string;
+      oidcIssuer?: string;
+      samlMetadataUrl?: string;
+      samlCertificate?: string;
+      samlCallbackUrl?: string;
+    },
   ) {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) {
       throw new NotFoundException('Company not found');
     }
 
+    const updateData: any = {};
+    if (dto.domain !== undefined) updateData.domain = dto.domain;
+    if (dto.googleClientId !== undefined) updateData.googleClientId = dto.googleClientId;
+    if (dto.authMode !== undefined) updateData.authMode = dto.authMode;
+    if (dto.mfaRequired !== undefined) updateData.mfaRequired = dto.mfaRequired;
+    if (dto.refreshTokenExpiryDays !== undefined) {
+      const days = Math.max(1, Math.min(90, dto.refreshTokenExpiryDays));
+      updateData.refreshTokenExpiryDays = days;
+    }
+    if (dto.oidcClientId !== undefined) updateData.oidcClientId = dto.oidcClientId;
+    if (dto.oidcClientSecret !== undefined) updateData.oidcClientSecret = dto.oidcClientSecret;
+    if (dto.oidcDiscoveryUrl !== undefined) updateData.oidcDiscoveryUrl = dto.oidcDiscoveryUrl;
+    if (dto.oidcIssuer !== undefined) updateData.oidcIssuer = dto.oidcIssuer;
+    if (dto.samlMetadataUrl !== undefined) updateData.samlMetadataUrl = dto.samlMetadataUrl;
+    if (dto.samlCertificate !== undefined) updateData.samlCertificate = dto.samlCertificate;
+    if (dto.samlCallbackUrl !== undefined) updateData.samlCallbackUrl = dto.samlCallbackUrl;
+
     const updated = await this.prisma.company.update({
       where: { id: companyId },
-      data: {
-        ...(dto.domain !== undefined && { domain: dto.domain }),
-        ...(dto.googleClientId !== undefined && { googleClientId: dto.googleClientId }),
-        ...(dto.authMode !== undefined && { authMode: dto.authMode }),
-      },
+      data: updateData,
     });
 
-    this.logger.log(`Company SSO config updated: ${updated.slug}`);
+    this.logger.log(`Company config updated: ${updated.slug}`);
 
     return {
       id: updated.id,
@@ -216,6 +244,11 @@ export class CompaniesService {
       authMode: updated.authMode,
       ssoProvider: updated.ssoProvider || '',
       googleClientId: updated.googleClientId || '',
+      mfaRequired: updated.mfaRequired,
+      refreshTokenExpiryDays: updated.refreshTokenExpiryDays,
+      oidcClientId: updated.oidcClientId || '',
+      oidcDiscoveryUrl: updated.oidcDiscoveryUrl || '',
+      samlMetadataUrl: updated.samlMetadataUrl || '',
     };
   }
 

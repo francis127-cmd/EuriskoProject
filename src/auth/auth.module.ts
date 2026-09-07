@@ -7,6 +7,8 @@ import { InvitationService } from './invitation.service';
 import { InvitationController } from './invitation.controller';
 import { RefreshTokenService } from './refresh-token.service';
 import { MfaService } from './mfa.service';
+import { OidcFederationService } from './oidc-federation.service';
+import { OidcFederationController } from './oidc-federation.controller';
 import { JwtGuard } from './jwt.guard';
 import { RolesGuard } from './roles.guard';
 import { AdminPrismaService } from '../admin-prisma.service';
@@ -19,16 +21,17 @@ import { AdminPrismaService } from '../admin-prisma.service';
       signOptions: { expiresIn: '15m' },
     }),
   ],
-  controllers: [AuthController, InvitationController],
+  controllers: [AuthController, InvitationController, OidcFederationController],
   providers: [
     AuthService,
     InvitationService,
     RefreshTokenService,
     MfaService,
+    OidcFederationService,
     AdminPrismaService,
     { provide: APP_GUARD, useClass: JwtGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [AuthService, JwtModule, AdminPrismaService, RefreshTokenService, MfaService],
+  exports: [AuthService, JwtModule, AdminPrismaService, RefreshTokenService, MfaService, OidcFederationService],
 })
 export class AuthModule {}

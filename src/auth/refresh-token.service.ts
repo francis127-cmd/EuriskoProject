@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AdminPrismaService } from '../admin-prisma.service';
 import * as crypto from 'crypto';
 
-const REFRESH_TOKEN_EXPIRY_DAYS = 7;
+const DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS = 7;
 const REFRESH_TOKEN_FAMILY_LIMIT = 50;
 
 @Injectable()
@@ -15,6 +15,20 @@ export class RefreshTokenService {
     private readonly jwtService: JwtService,
   ) {}
 
+  async getExpiryDaysForUser(userId: string): Promise<number> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { companyId: true },
+    });
+    if (!user) return DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS;
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: user.companyId },
+      select: { refreshTokenExpiryDays: true },
+    });
+    return company?.refreshTokenExpiryDays || DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS;
+  }
+
   async generateRefreshToken(
     userId: string,
     ip?: string,
@@ -24,7 +38,9 @@ export class RefreshTokenService {
     const family = existingFamily || crypto.randomUUID();
     const rawToken = crypto.randomBytes(64).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 86400000);
+
+    const expiryDays = await this.getExpiryDaysForUser(userId);
+    const expiresAt = new Date(Date.now() + expiryDays * 86400000);
 
     await this.prisma.refreshToken.create({
       data: {
@@ -50,7 +66,7 @@ export class RefreshTokenService {
 
     const refreshToken = this.jwtService.sign(
       { sub: userId, family, type: 'refresh' },
-      { expiresIn: `${REFRESH_TOKEN_EXPIRY_DAYS}d` },
+      { expiresIn: `${expiryDays}d` },
     );
 
     return { refreshToken, expiresAt };

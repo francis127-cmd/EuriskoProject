@@ -23,6 +23,14 @@ async function main() {
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "googleClientId" TEXT;
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "authMode" TEXT NOT NULL DEFAULT 'PASSWORD';
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "mfaRequired" BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "refreshTokenExpiryDays" INTEGER NOT NULL DEFAULT 7;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "oidcClientId" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "oidcClientSecret" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "oidcDiscoveryUrl" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "oidcIssuer" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "samlMetadataUrl" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "samlCertificate" TEXT;
+      ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "samlCallbackUrl" TEXT;
       ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordHash" TEXT;
       ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "mfaEnabled" BOOLEAN NOT NULL DEFAULT false;
     `);
@@ -117,6 +125,32 @@ async function main() {
       END $$;
     `);
     console.log('[start.js] DomainVerification table ensured.');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "OidcProvider" (
+        "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
+        "companyId" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "issuer" TEXT NOT NULL,
+        "clientId" TEXT NOT NULL,
+        "clientSecret" TEXT NOT NULL,
+        "discoveryUrl" TEXT NOT NULL,
+        "redirectUri" TEXT NOT NULL,
+        "scopes" TEXT NOT NULL DEFAULT 'openid email profile',
+        "iconUrl" TEXT,
+        "active" BOOLEAN NOT NULL DEFAULT true,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT now(),
+
+        CONSTRAINT "OidcProvider_pkey" PRIMARY KEY ("id"),
+        CONSTRAINT "OidcProvider_companyId_name_key" UNIQUE ("companyId", "name")
+      );
+
+      ALTER TABLE "OidcProvider"
+        ADD CONSTRAINT IF NOT EXISTS "OidcProvider_companyId_fkey"
+        FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    `);
+    console.log('[start.js] OidcProvider table ensured.');
   } catch (e) {
     console.warn('[start.js] Table creation warning:', e && e.message ? e.message : e);
   }
