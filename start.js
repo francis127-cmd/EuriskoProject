@@ -1,5 +1,6 @@
 require('dotenv/config');
 const { execSync } = require('child_process');
+const { Pool } = require('pg');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 
@@ -11,11 +12,12 @@ function createClient() {
 async function main() {
   console.log('[start.js] Running startup tasks...');
 
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
   // Step 1: Ensure required columns exist (idempotent)
   console.log('[start.js] Ensuring required columns...');
-  const client = createClient();
   try {
-    await client.$executeRawUnsafe(`
+    await pool.query(`
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "domain" TEXT;
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "ssoProvider" TEXT;
       ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "googleClientId" TEXT;
@@ -24,36 +26,32 @@ async function main() {
     `);
     console.log('[start.js] Columns ensured.');
 
-    await client.$executeRawUnsafe(`
+    await pool.query(`
       DO $$ BEGIN
         ALTER TABLE "User" ALTER COLUMN "ssoSubject" DROP NOT NULL;
       EXCEPTION WHEN others THEN null;
       END $$;
     `);
 
-    await client.$executeRawUnsafe(`
-      DROP INDEX IF EXISTS "User_companyId_ssoSubject_key";
-    `);
+    await pool.query(`DROP INDEX IF EXISTS "User_companyId_ssoSubject_key";`);
   } catch (e) {
     console.warn('[start.js] Column setup warning:', e && e.message ? e.message : e);
-  } finally {
-    await client.$disconnect();
   }
 
   // Step 2: Clean up stuck migrations
   console.log('[start.js] Cleaning up stuck migrations...');
   try {
-    const stuckClient = new PrismaClient();
-    await stuckClient.$executeRawUnsafe(`
+    const result = await pool.query(`
       DELETE FROM "_prisma_migrations"
       WHERE "migration_name" = '20260905180000_add_multi_tenancy'
-        AND "finished_at" IS NULL;
+        AND "finished_at" IS NULL
     `);
-    console.log('[start.js] Stuck migrations cleaned.');
-    await stuckClient.$disconnect();
+    console.log('[start.js] Stuck migrations cleaned. Rows affected:', result.rowCount);
   } catch (e) {
     console.warn('[start.js] Stuck migration cleanup warning:', e && e.message ? e.message : e);
   }
+
+  await pool.end();
 
   // Step 3: Run Prisma migrations
   console.log('[start.js] Running prisma migrate deploy...');
