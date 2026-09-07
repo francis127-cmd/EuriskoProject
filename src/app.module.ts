@@ -12,6 +12,8 @@ import { CatalogModule } from './catalog/catalog.module';
 import { RetentionModule } from './retention/retention.module';
 import { AdminModule } from './admin/admin.module';
 import { CompaniesModule } from './companies/companies.module';
+import { DomainsModule } from './domains/domains.module';
+import { ScimModule } from './scim/scim.module';
 import { InfraExceptionFilter } from './common/infra-exception.filter';
 import { AppController } from './app.controller';
 
@@ -33,6 +35,8 @@ import { AppController } from './app.controller';
     RetentionModule,
     AdminModule,
     CompaniesModule,
+    DomainsModule,
+    ScimModule,
   ],
   controllers: [AppController],
   providers: [

@@ -38,12 +38,14 @@ model Company {
   authMode       String  @default("PASSWORD") // PASSWORD or SSO
   ssoProvider    String?
   googleClientId String?
+  mfaRequired    Boolean @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   users       User[]
   departments Department[]
   invitations Invitation[]
+  domainVerifications DomainVerification[]
 
   @@map("Company")
 }
@@ -57,6 +59,7 @@ model User {
   passwordHash   String?
   platformRole   PlatformRole @default(EMPLOYEE)
   active         Boolean      @default(true)
+  mfaEnabled     Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -66,6 +69,8 @@ model User {
   claimedRequests Request[]          @relation("AgentRequests")
   documents       Document[]
   auditLogs       AuditLog[]
+  refreshTokens   RefreshToken[]
+  mfaSecret       MfaSecret?
 
   @@unique([companyId, ssoSubject])
   @@unique([companyId, email])
@@ -210,4 +215,54 @@ model Invitation {
   @@unique([companyId, email])
   @@index([token])
   @@map("Invitation")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  family    String
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([family])
+  @@map("RefreshToken")
+}
+
+model MfaSecret {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  secret      String
+  enabled     Boolean  @default(false)
+  backupCodes String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("MfaSecret")
+}
+
+model DomainVerification {
+  id         String   @id @default(uuid())
+  companyId  String
+  domain     String
+  token      String   @unique
+  verified   Boolean  @default(false)
+  verifiedAt DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, domain])
+  @@index([token])
+  @@map("DomainVerification")
 }

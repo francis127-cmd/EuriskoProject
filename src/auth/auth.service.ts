@@ -4,6 +4,8 @@ import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
 import { AdminPrismaService } from '../admin-prisma.service';
 import { TenantContext } from '../tenant-context';
+import { RefreshTokenService } from './refresh-token.service';
+import { MfaService } from './mfa.service';
 
 export interface AuthUser {
   sub: string;
@@ -27,17 +29,12 @@ export class AuthService {
   constructor(
     private readonly prisma: AdminPrismaService,
     private readonly jwtService: JwtService,
+    private readonly refreshTokenService: RefreshTokenService,
+    private readonly mfaService: MfaService,
   ) {
     this.googleClient = new OAuth2Client(process.env['GOOGLE_CLIENT_ID']);
   }
 
-  /**
-   * Discover authentication mode for an email address.
-   *
-   * SECURITY: Uses DOMAIN-based company lookup (not user lookup) to prevent
-   * account enumeration. Public email providers (gmail, yahoo, etc.) always
-   * return REGISTER — they cannot be used for domain-based routing.
-   */
   async discover(email: string) {
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain) return { authMode: 'REGISTER' };
@@ -64,16 +61,7 @@ export class AuthService {
     };
   }
 
-  /**
-   * Password-based login with tenant scoping.
-   *
-   * SECURITY:
-   * - Accepts optional companySlug for explicit tenant binding
-   * - Always queries companyId + email (tenant-scoped)
-   * - Returns identical "Invalid credentials" on ALL failures (no enumeration)
-   * - Logs all attempts for audit trail
-   */
-  async loginPassword(email: string, password: string, companySlug?: string) {
+  async loginPassword(email: string, password: string, companySlug?: string, ip?: string, userAgent?: string) {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
     let company: any;
 
@@ -113,22 +101,56 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    const mfaEnabled = await this.mfaService.getMfaStatus(user.id);
+    if (mfaEnabled.enabled && company.mfaRequired) {
+      this.logger.log(`[${requestId}] MFA required: email=${email} company=${company.slug}`);
+      const mfaToken = this.jwtService.sign(
+        { sub: user.id, type: 'mfa_pending', companyId: user.companyId },
+        { expiresIn: '5m' },
+      );
+      return { mfaRequired: true, mfaToken };
+    }
+
     this.logger.log(`[${requestId}] Login OK: email=${email} company=${company.slug} role=${user.platformRole}`);
-    const token = this.signToken(user);
-    return { accessToken: token };
+    return this.issueTokenPair(user, ip, userAgent);
   }
 
-  /**
-   * Register a new user with password. Creates a new company if companyName
-   * is provided, or joins an existing company via companySlug.
-   */
+  async completeMfaChallenge(mfaToken: string, mfaCode: string, ip?: string, userAgent?: string) {
+    const requestId = TenantContext.getStore()?.requestId || 'N/A';
+
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(mfaToken);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired MFA session');
+    }
+
+    if (payload.type !== 'mfa_pending') {
+      throw new UnauthorizedException('Invalid token type');
+    }
+
+    const verified = await this.mfaService.verifyMfaToken(payload.sub, mfaCode);
+    if (!verified) {
+      this.logger.warn(`[${requestId}] MFA challenge failed for user ${payload.sub}`);
+      throw new UnauthorizedException('Invalid MFA code');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || !user.active) {
+      throw new UnauthorizedException('Account not found or deactivated');
+    }
+
+    this.logger.log(`[${requestId}] MFA challenge passed for user ${user.email}`);
+    return this.issueTokenPair(user, ip, userAgent);
+  }
+
   async registerPassword(dto: {
     email: string;
     password: string;
     displayName?: string;
     companyName?: string;
     companySlug?: string;
-  }) {
+  }, ip?: string, userAgent?: string) {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
 
     const existing = await this.prisma.user.findFirst({ where: { email: dto.email } });
@@ -168,22 +190,10 @@ export class AuthService {
     });
 
     this.logger.log(`[${requestId}] Registration: email=${dto.email} company=${companyId} newCompany=${newCompany}`);
-    const token = this.signToken(user);
-    return { accessToken: token, newCompany };
+    return this.issueTokenPair(user, ip, userAgent, newCompany);
   }
 
-  /**
-   * Google SSO login with full identity verification.
-   *
-   * SECURITY:
-   * - Verifies token signature (via google-auth-library)
-   * - Enforces email_verified = true
-   * - Enforces issuer = accounts.google.com or securetoken.google.com
-   * - Enforces hd claim matches company domain (for SSO companies)
-   * - Tenant-scoped user lookup
-   * - Logs all attempts
-   */
-  async loginGoogle(idToken: string) {
+  async loginGoogle(idToken: string, ip?: string, userAgent?: string) {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
 
     let payload;
@@ -238,11 +248,10 @@ export class AuthService {
     }
 
     this.logger.log(`[${requestId}] Google login OK: email=${payload.email} company=${company?.slug}`);
-    const token = this.signToken(user);
-    return { accessToken: token, newCompany: false };
+    return this.issueTokenPair(user, ip, userAgent);
   }
 
-  async acceptInvite(token: string, password: string) {
+  async acceptInvite(token: string, password: string, ip?: string, userAgent?: string) {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
 
     const invitation = await this.prisma.invitation.findFirst({ where: { token } });
@@ -277,8 +286,7 @@ export class AuthService {
     await this.prisma.invitation.delete({ where: { id: invitation.id } });
 
     this.logger.log(`[${requestId}] Invite accepted: email=${invitation.email} company=${invitation.companyId}`);
-    const jwtToken = this.signToken(user);
-    return { accessToken: jwtToken };
+    return this.issueTokenPair(user, ip, userAgent);
   }
 
   async validateInviteToken(token: string) {
@@ -304,7 +312,40 @@ export class AuthService {
     }
   }
 
-  private signToken(user: { id: string; email: string; displayName: string; platformRole: string; companyId: string }): string {
+  async logout(refreshToken?: string): Promise<void> {
+    if (refreshToken) {
+      await this.refreshTokenService.revokeRefreshToken(refreshToken);
+    }
+  }
+
+  async logoutAll(userId: string): Promise<void> {
+    await this.refreshTokenService.revokeAllUserTokens(userId);
+  }
+
+  async refreshTokens(refreshToken: string, ip?: string, userAgent?: string) {
+    return this.refreshTokenService.rotateRefreshToken(refreshToken, ip, userAgent);
+  }
+
+  private async issueTokenPair(
+    user: { id: string; email: string; displayName: string; platformRole: string; companyId: string },
+    ip?: string,
+    userAgent?: string,
+    newCompany?: boolean,
+  ) {
+    const accessToken = this.signAccessToken(user);
+    const { refreshToken, expiresAt } = await this.refreshTokenService.generateRefreshToken(
+      user.id, ip, userAgent,
+    );
+
+    return {
+      accessToken,
+      refreshToken,
+      refreshTokenExpiresAt: expiresAt.toISOString(),
+      ...(newCompany !== undefined && { newCompany }),
+    };
+  }
+
+  private signAccessToken(user: { id: string; email: string; displayName: string; platformRole: string; companyId: string }): string {
     const payload: AuthUser = {
       sub: user.id,
       email: user.email,
@@ -312,6 +353,6 @@ export class AuthService {
       role: user.platformRole,
       companyId: user.companyId,
     };
-    return this.jwtService.sign(payload);
+    return this.jwtService.sign(payload, { expiresIn: '15m' });
   }
 }
