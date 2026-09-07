@@ -157,6 +157,16 @@ export class CompaniesService {
         slug: company.slug,
         adminId: admin.id,
         adminEmail: admin.email,
+        company: {
+          id: company.id,
+          name: company.name,
+          slug: company.slug,
+          authMode: company.authMode,
+        },
+        admin: {
+          id: admin.id,
+          email: admin.email,
+        },
       };
     });
   }

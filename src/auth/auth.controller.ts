@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Get, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { Public } from './public.decorator';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 
 class DiscoverDto {
@@ -53,6 +54,7 @@ class AcceptInviteDto {
   password: string;
 }
 
+@Public()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

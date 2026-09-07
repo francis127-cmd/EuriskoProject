@@ -1,6 +1,7 @@
 import { Controller, Get, Patch, Post, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { CompaniesService } from './companies.service';
 import { Roles } from '../auth/roles.decorator';
+import { Public } from '../auth/public.decorator';
 import { PlatformRole } from '@prisma/client';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 
@@ -57,6 +58,7 @@ class UpdateSsoDto {
 export class CompaniesController {
   constructor(private readonly companiesService: CompaniesService) {}
 
+  @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() dto: RegisterCompanyDto) {
