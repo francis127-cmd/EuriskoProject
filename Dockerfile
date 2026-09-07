@@ -5,11 +5,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --legacy-peer-deps
 
-COPY prisma ./prisma/
-RUN npx prisma generate
-
 COPY . .
-RUN npx tsc
+RUN npx prisma generate
 
 EXPOSE 3000
 CMD ["node", "start.js"]

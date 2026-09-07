@@ -129,30 +129,45 @@ export class RequestsService {
   async claimRequest(id: string, user: AuthUser) {
     const request = await this.prisma.request.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Request not found');
-    if (request.claimedBy) throw new BadRequestException('Request already claimed');
+    if (request.claimedBy) throw new ConflictException('Request is already claimed');
     if (request.status === 'COMPLETED' || request.status === 'CANCELLED' || request.status === 'REJECTED') {
       throw new BadRequestException('Cannot claim a closed request');
     }
 
-    const updated = await this.prisma.request.update({
-      where: { id },
-      data: { claimedBy: user.sub, status: 'IN_PROGRESS' },
-      include: {
-        department: { select: { code: true, name: true } },
-        requestType: { select: { code: true, name: true } },
+    // Atomic compare-and-swap: guarantees exactly one concurrent claimant succeeds
+    const claimResult = await this.prisma.request.updateMany({
+      where: {
+        id,
+        claimedBy: null,
+        status: 'PENDING',
+      },
+      data: {
+        claimedBy: user.sub,
+        status: 'IN_PROGRESS',
       },
     });
+
+    if (claimResult.count === 0) {
+      throw new ConflictException('Concurrent claim conflict: Another agent claimed this request');
+    }
 
     await this.prisma.auditLog.create({
       data: {
         requestId: id,
         actorId: user.sub,
         action: 'REQUEST_CLAIMED',
-        newValue: user.name,
+        newValue: user.displayName || user.name || user.sub,
       },
     });
 
-    return updated;
+    return this.prisma.request.findUnique({
+      where: { id },
+      include: {
+        department: { select: { code: true, name: true } },
+        requestType: { select: { code: true, name: true } },
+        employee: { select: { id: true, displayName: true, email: true } },
+      },
+    });
   }
 
   async updateStatus(id: string, user: AuthUser, dto: { status: string; resolutionNote?: string; rejectionReason?: string }) {

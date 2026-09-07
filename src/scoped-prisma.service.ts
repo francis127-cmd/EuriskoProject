@@ -5,14 +5,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { TenantContext } from './tenant-context';
 
 /**
- * Scoped PrismaClient that automatically injects companyId into all queries
- * based on the current request's tenant context (AsyncLocalStorage).
+ * Enterprise Scoped Prisma Client
  *
- * Models with a direct `companyId` column get auto-filtered:
- *   User, Department, Invitation
- *
- * Uses Prisma Client Extensions ($extends) instead of middleware for
- * Prisma 7.x compatibility.
+ * Automatically injects tenant isolation constraints into all Prisma operations.
+ * Covers both direct companyId models and relational child models.
  */
 @Injectable()
 export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
@@ -44,52 +40,83 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
   }
 
   private installScoping() {
-    const TENANT_MODELS = new Set(['User', 'Department', 'Invitation']);
+    const DIRECT_TENANT_MODELS = new Set(['User', 'Department', 'Invitation']);
+    const RELATIONAL_TENANT_MODELS = new Set([
+      'Request',
+      'Document',
+      'DepartmentMember',
+      'RequestType',
+    ]);
     const base = this._baseClient;
 
     this._scopedClient = base.$extends({
       query: {
         $allModels: {
           async $allOperations({ model, operation, args, query }: any) {
-            if (!model || !TENANT_MODELS.has(model)) {
-              return query(args);
-            }
-
             const tenant = TenantContext.getStore();
-            if (!tenant?.companyId) {
+            const cid = tenant?.companyId;
+
+            // If no company context (e.g. system background worker, registration), pass through
+            if (!cid || !model) {
               return query(args);
             }
 
-            const cid = tenant.companyId;
-
-            // READ operations — add companyId filter
-            if (['findMany', 'findFirst', 'count', 'aggregate'].includes(operation)) {
-              args.where = { ...args.where, companyId: cid };
-              return query(args);
-            }
-
-            if (operation === 'findUnique') {
-              const result = await query(args);
-              if (result && result.companyId && result.companyId !== cid) {
-                throw new Error('Tenant isolation violation: record belongs to another company');
+            // Direct companyId models: User, Department, Invitation
+            if (DIRECT_TENANT_MODELS.has(model)) {
+              if (['findMany', 'findFirst', 'count', 'aggregate'].includes(operation)) {
+                args.where = { ...args.where, companyId: cid };
+                return query(args);
               }
-              return result;
-            }
 
-            // CREATE — auto-set and validate companyId
-            if (operation === 'create') {
-              if (!args.data.companyId) {
-                args.data = { ...args.data, companyId: cid };
-              } else if (args.data.companyId !== cid) {
-                throw new Error('Tenant isolation violation: cannot create record for another company');
+              if (operation === 'findUnique') {
+                const result = await query(args);
+                if (result && result.companyId && result.companyId !== cid) {
+                  throw new Error('Tenant isolation violation: record belongs to another company');
+                }
+                return result;
               }
-              return query(args);
+
+              if (operation === 'create') {
+                if (!args.data.companyId) {
+                  args.data = { ...args.data, companyId: cid };
+                } else if (args.data.companyId !== cid) {
+                  throw new Error('Tenant isolation violation: cannot create record for another company');
+                }
+                return query(args);
+              }
+
+              if (['update', 'updateMany', 'delete', 'deleteMany', 'upsert'].includes(operation)) {
+                args.where = { ...args.where, companyId: cid };
+                return query(args);
+              }
             }
 
-            // UPDATE/DELETE — scope by companyId
-            if (['update', 'updateMany', 'delete', 'deleteMany', 'upsert'].includes(operation)) {
-              args.where = { ...args.where, companyId: cid };
-              return query(args);
+            // Relational models: Request, Document, DepartmentMember, RequestType
+            if (RELATIONAL_TENANT_MODELS.has(model)) {
+              if (model === 'Request') {
+                if (['findMany', 'findFirst', 'count', 'aggregate'].includes(operation)) {
+                  args.where = { ...args.where, department: { companyId: cid } };
+                  return query(args);
+                }
+                if (['update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
+                  args.where = { ...args.where, department: { companyId: cid } };
+                  return query(args);
+                }
+              }
+
+              if (model === 'Document') {
+                if (['findMany', 'findFirst', 'count', 'aggregate', 'update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
+                  args.where = { ...args.where, request: { department: { companyId: cid } } };
+                  return query(args);
+                }
+              }
+
+              if (model === 'DepartmentMember' || model === 'RequestType') {
+                if (['findMany', 'findFirst', 'count', 'aggregate', 'update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
+                  args.where = { ...args.where, department: { companyId: cid } };
+                  return query(args);
+                }
+              }
             }
 
             return query(args);
@@ -98,10 +125,10 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    this.logger.log('Tenant-scoping extensions installed');
+    this.logger.log('Strict multi-tenant scoping extensions installed');
   }
 
-  // Delegate all PrismaClient methods to the scoped client
+  // Delegate PrismaClient accessors to scoped client
   get user() { return this.client.user; }
   get company() { return this.client.company; }
   get department() { return this.client.department; }
@@ -111,6 +138,7 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
   get document() { return this.client.document; }
   get auditLog() { return this.client.auditLog; }
   get invitation() { return this.client.invitation; }
+  get notificationEvent() { return this.client.notificationEvent; }
 
   async $connect() { return this._baseClient.$connect(); }
   async $disconnect() { return this._baseClient.$disconnect(); }
