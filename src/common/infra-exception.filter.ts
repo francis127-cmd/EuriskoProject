@@ -73,10 +73,12 @@ export class InfraExceptionFilter implements ExceptionFilter {
     // Secure server-side audit logging
     this.logger.error(`[${requestId}] Unhandled error on ${req.method} ${req.url}: ${rawMessage}`, stack);
 
-    // TEMP: return actual error for debugging (revert after)
+    // Sanitized client payload - zero leakage
     return res.status(status).json({
       statusCode: status,
-      message: `${isInfra ? 'Service unavailable' : 'Internal error'}: ${rawMessage}`,
+      message: isInfra
+        ? 'Service temporarily unavailable. Please try again shortly.'
+        : 'An internal server error occurred.',
       requestId,
       timestamp: new Date().toISOString(),
       path: req.url,
