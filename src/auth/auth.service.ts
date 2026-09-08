@@ -39,8 +39,23 @@ export class AuthService {
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain) return { authMode: 'REGISTER' };
 
+    const existingUser = await this.prisma.user.findFirst({
+      where: { email },
+      select: { id: true, companyId: true, company: { select: { slug: true, name: true, authMode: true, googleClientId: true } } },
+    });
+
+    if (existingUser) {
+      this.logger.log(`Discover: known user ${email} -> ${existingUser.company.slug} (${existingUser.company.authMode})`);
+      return {
+        authMode: existingUser.company.authMode || 'PASSWORD',
+        companySlug: existingUser.company.slug,
+        companyName: existingUser.company.name,
+        companyId: existingUser.companyId,
+      };
+    }
+
     if (PUBLIC_EMAIL_PROVIDERS.has(domain)) {
-      this.logger.log(`Discover: public provider ${domain} -> REGISTER`);
+      this.logger.log(`Discover: public provider ${domain}, no user -> REGISTER`);
       return { authMode: 'REGISTER' };
     }
 
