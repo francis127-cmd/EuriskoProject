@@ -156,7 +156,6 @@ export class ScopedPrismaService implements OnModuleInit, OnModuleDestroy {
   get document() { return this.client.document; }
   get auditLog() { return this.client.auditLog; }
   get invitation() { return this.client.invitation; }
-  get notificationEvent() { return this.client.notificationEvent; }
 
   async $connect() { return this._baseClient.$connect(); }
   async $disconnect() { return this._baseClient.$disconnect(); }

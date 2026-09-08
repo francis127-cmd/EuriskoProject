@@ -13,6 +13,13 @@ const ALLOWED_MIME = new Set(['application/pdf', 'image/png', 'image/jpeg', 'ima
 const ALLOWED_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg']);
 const MAX_BYTES = 5 * 1024 * 1024;
 
+const MAGIC_BYTES: Record<string, Buffer[]> = {
+  'application/pdf': [Buffer.from([0x25, 0x50, 0x44, 0x46])],
+  'image/png': [Buffer.from([0x89, 0x50, 0x4e, 0x47])],
+  'image/jpeg': [Buffer.from([0xff, 0xd8, 0xff])],
+  'image/jpg': [Buffer.from([0xff, 0xd8, 0xff])],
+};
+
 @Injectable()
 export class DocumentsService {
   constructor(
@@ -54,6 +61,15 @@ export class DocumentsService {
     }
     if (file.mimetype && !ALLOWED_MIME.has(file.mimetype)) {
       throw new BadRequestException('Unsupported MIME type');
+    }
+
+    const expectedSignatures = MAGIC_BYTES[file.mimetype || ''];
+    if (expectedSignatures && file.buffer.byteLength >= 4) {
+      const fileHeader = file.buffer.subarray(0, 4);
+      const validSignature = expectedSignatures.some((sig) => fileHeader.subarray(0, sig.length).equals(sig));
+      if (!validSignature) {
+        throw new BadRequestException('File content does not match its declared type');
+      }
     }
 
     const checksum = createHash('sha256').update(file.buffer).digest('hex');

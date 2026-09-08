@@ -1,7 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import { ScopedPrismaService } from '../scoped-prisma.service';
 import { DepartmentsService } from '../departments/departments.service';
 import { AuthUser } from '../auth/auth.service';
+
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
+  IN_PROGRESS: ['COMPLETED', 'REJECTED'],
+};
 
 @Injectable()
 export class RequestsService {
@@ -32,7 +37,30 @@ export class RequestsService {
         where: { code: departmentCode },
       });
       if (!dept) throw new NotFoundException(`Department ${departmentCode} not found`);
+
+      const isMember = await this.departments.isMemberOf(user, dept.id);
+      if (!isMember) {
+        throw new ForbiddenException('You are not a member of this department');
+      }
       departmentId = dept.id;
+    } else {
+      if (user.role !== 'SYSTEM_ADMIN') {
+        const memberships = await this.departments.getMemberships(user);
+        const deptIds = memberships.map((m) => m.departmentId);
+        if (deptIds.length === 0) return [];
+        return this.prisma.request.findMany({
+          where: { departmentId: { in: deptIds }, status: { notIn: ['COMPLETED', 'CANCELLED', 'REJECTED'] } },
+          include: {
+            department: { select: { code: true, name: true } },
+            requestType: { select: { code: true, name: true } },
+            employee: { select: { id: true, displayName: true, email: true } },
+          },
+          orderBy: [
+            { priority: 'asc' },
+            { createdAt: 'asc' },
+          ],
+        });
+      }
     }
 
     const where: any = { status: { notIn: ['COMPLETED', 'CANCELLED', 'REJECTED'] } };
@@ -45,7 +73,10 @@ export class RequestsService {
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { priority: 'asc' },
+        { createdAt: 'asc' },
+      ],
     });
   }
 
@@ -65,7 +96,7 @@ export class RequestsService {
     const request = await this.prisma.request.findUnique({
       where: { id },
       include: {
-        department: { select: { code: true, name: true } },
+        department: { select: { id: true, code: true, name: true, companyId: true } },
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
         documents: { where: { deletedAt: null }, select: { id: true, originalFilename: true, mimeType: true, byteSize: true, checksum: true, createdAt: true } },
@@ -73,68 +104,97 @@ export class RequestsService {
       },
     });
     if (!request) throw new NotFoundException('Request not found');
+
+    if (request.department.companyId !== user.companyId) {
+      throw new NotFoundException('Request not found');
+    }
+
+    if (user.role === 'SYSTEM_ADMIN') {
+      return request;
+    }
+
+    if (request.employeeId === user.sub) {
+      return request;
+    }
+
+    const isMember = await this.departments.isMemberOf(user, request.departmentId);
+    if (!isMember) {
+      throw new ForbiddenException('You do not have access to this request');
+    }
+
     return request;
   }
 
   async getStats(user: AuthUser) {
-    const where = {};
     const [total, pending, inProgress, completed, rejected, cancelled] = await Promise.all([
-      this.prisma.request.count({ where: { ...where, employeeId: user.sub } }),
-      this.prisma.request.count({ where: { ...where, employeeId: user.sub, status: 'PENDING' } }),
-      this.prisma.request.count({ where: { ...where, employeeId: user.sub, status: 'IN_PROGRESS' } }),
-      this.prisma.request.count({ where: { ...where, employeeId: user.sub, status: 'COMPLETED' } }),
-      this.prisma.request.count({ where: { ...where, employeeId: user.sub, status: 'REJECTED' } }),
-      this.prisma.request.count({ where: { ...where, employeeId: user.sub, status: 'CANCELLED' } }),
+      this.prisma.request.count({ where: { employeeId: user.sub } }),
+      this.prisma.request.count({ where: { employeeId: user.sub, status: 'PENDING' } }),
+      this.prisma.request.count({ where: { employeeId: user.sub, status: 'IN_PROGRESS' } }),
+      this.prisma.request.count({ where: { employeeId: user.sub, status: 'COMPLETED' } }),
+      this.prisma.request.count({ where: { employeeId: user.sub, status: 'REJECTED' } }),
+      this.prisma.request.count({ where: { employeeId: user.sub, status: 'CANCELLED' } }),
     ]);
     return { total, pending, inProgress, completed, rejected, cancelled };
   }
 
   async createRequest(user: AuthUser, dto: { departmentCode: string; requestTypeCode: string; title: string; description?: string; priority?: string }) {
     const dept = await this.prisma.department.findFirst({
-      where: { code: dto.departmentCode },
-      include: { requestTypes: true },
+      where: { code: dto.departmentCode, companyId: user.companyId },
+      include: { requestTypes: { where: { active: true } } },
     });
     if (!dept) throw new NotFoundException(`Department ${dto.departmentCode} not found`);
 
     const rt = dept.requestTypes.find((t) => t.code === dto.requestTypeCode);
-    if (!rt) throw new NotFoundException(`Request type ${dto.requestTypeCode} not found in ${dto.departmentCode}`);
+    if (!rt) throw new NotFoundException(`Request type ${dto.requestTypeCode} not found or inactive in ${dto.departmentCode}`);
 
-    const request = await this.prisma.request.create({
-      data: {
-        employeeId: user.sub,
-        departmentId: dept.id,
-        requestTypeId: rt.id,
-        title: dto.title,
-        description: dto.description || '',
-        priority: (dto.priority as any) || rt.defaultPriority,
-      },
-      include: {
-        department: { select: { code: true, name: true } },
-        requestType: { select: { code: true, name: true } },
-      },
-    });
+    const request = await this.prisma.$transaction(async (tx) => {
+      const req = await tx.request.create({
+        data: {
+          employeeId: user.sub,
+          departmentId: dept.id,
+          requestTypeId: rt.id,
+          title: dto.title,
+          description: dto.description || '',
+          priority: (dto.priority as any) || rt.defaultPriority,
+        },
+        include: {
+          department: { select: { code: true, name: true } },
+          requestType: { select: { code: true, name: true } },
+        },
+      });
 
-    await this.prisma.auditLog.create({
-      data: {
-        requestId: request.id,
-        actorId: user.sub,
-        action: 'REQUEST_CREATED',
-        newValue: request.title,
-      },
+      await tx.auditLog.create({
+        data: {
+          requestId: req.id,
+          actorId: user.sub,
+          action: 'REQUEST_CREATED',
+          newValue: req.title,
+        },
+      });
+
+      return req;
     });
 
     return request;
   }
 
   async claimRequest(id: string, user: AuthUser) {
-    const request = await this.prisma.request.findUnique({ where: { id } });
+    const request = await this.prisma.request.findUnique({
+      where: { id },
+      include: { department: { select: { id: true } } },
+    });
     if (!request) throw new NotFoundException('Request not found');
-    if (request.claimedBy) throw new ConflictException('Request is already claimed');
-    if (request.status === 'COMPLETED' || request.status === 'CANCELLED' || request.status === 'REJECTED') {
-      throw new BadRequestException('Cannot claim a closed request');
+
+    const isMember = await this.departments.isMemberOf(user, request.departmentId);
+    if (!isMember) {
+      throw new ForbiddenException('You are not a member of this department');
     }
 
-    // Atomic compare-and-swap: guarantees exactly one concurrent claimant succeeds
+    if (request.claimedBy) throw new ConflictException('Request is already claimed');
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Only PENDING requests can be claimed');
+    }
+
     const claimResult = await this.prisma.request.updateMany({
       where: {
         id,
@@ -171,70 +231,107 @@ export class RequestsService {
   }
 
   async updateStatus(id: string, user: AuthUser, dto: { status: string; resolutionNote?: string; rejectionReason?: string }) {
-    const request = await this.prisma.request.findUnique({ where: { id } });
+    const request = await this.prisma.request.findUnique({
+      where: { id },
+      include: { department: { select: { id: true } } },
+    });
     if (!request) throw new NotFoundException('Request not found');
 
-    const data: any = { status: dto.status };
-    if (dto.resolutionNote) data.resolutionNote = dto.resolutionNote;
-    if (dto.rejectionReason) data.rejectionReason = dto.rejectionReason;
-    if (dto.status === 'COMPLETED' || dto.status === 'REJECTED' || dto.status === 'CANCELLED') {
-      data.completedAt = new Date();
+    const isMember = await this.departments.isMemberOf(user, request.departmentId);
+    if (!isMember && user.role !== 'SYSTEM_ADMIN') {
+      throw new ForbiddenException('You are not authorized to update this request');
     }
 
-    const updated = await this.prisma.request.update({
-      where: { id },
-      data,
-      include: {
-        department: { select: { code: true, name: true } },
-        requestType: { select: { code: true, name: true } },
-      },
-    });
+    const validNext = VALID_TRANSITIONS[request.status];
+    if (!validNext || !validNext.includes(dto.status)) {
+      throw new BadRequestException(
+        `Invalid transition: ${request.status} -> ${dto.status}. Allowed: ${validNext?.join(', ') || 'none'}`,
+      );
+    }
 
-      await this.prisma.auditLog.create({
-      data: {
-        requestId: id,
-        actorId: user.sub,
-        action: `STATUS_${dto.status}`,
-        oldValue: request.status,
-        newValue: dto.status,
-        metadata: dto.resolutionNote
-          ? { resolutionNote: dto.resolutionNote }
-          : dto.rejectionReason
-            ? { rejectionReason: dto.rejectionReason }
-            : undefined,
-      },
-    });
+    if (dto.status === 'COMPLETED') {
+      const hasResolution = dto.resolutionNote && dto.resolutionNote.trim().length > 0;
+      if (!hasResolution) {
+        const docCount = await this.prisma.document.count({
+          where: { requestId: id, deletedAt: null },
+        });
+        if (docCount === 0) {
+          throw new BadRequestException('Completion requires a non-empty resolution note or at least one attached document');
+        }
+      }
+    }
 
-    return updated;
+    if (dto.status === 'REJECTED') {
+      if (!dto.rejectionReason || dto.rejectionReason.trim().length === 0) {
+        throw new BadRequestException('Rejection requires a reason');
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const data: any = { status: dto.status };
+      if (dto.resolutionNote) data.resolutionNote = dto.resolutionNote;
+      if (dto.rejectionReason) data.rejectionReason = dto.rejectionReason;
+      if (dto.status === 'COMPLETED' || dto.status === 'REJECTED' || dto.status === 'CANCELLED') {
+        data.completedAt = new Date();
+      }
+
+      const updated = await tx.request.update({
+        where: { id },
+        data,
+        include: {
+          department: { select: { code: true, name: true } },
+          requestType: { select: { code: true, name: true } },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          requestId: id,
+          actorId: user.sub,
+          action: `STATUS_${dto.status}`,
+          oldValue: request.status,
+          newValue: dto.status,
+          metadata: dto.resolutionNote
+            ? { resolutionNote: dto.resolutionNote }
+            : dto.rejectionReason
+              ? { rejectionReason: dto.rejectionReason }
+              : undefined,
+        },
+      });
+
+      return updated;
+    });
   }
 
   async cancelRequest(id: string, user: AuthUser) {
     const request = await this.prisma.request.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Request not found');
-    if (request.employeeId !== user.sub) throw new BadRequestException('Only the employee can cancel');
-    if (request.status === 'COMPLETED' || request.status === 'CANCELLED') {
-      throw new BadRequestException('Cannot cancel a closed request');
+    if (request.employeeId !== user.sub) throw new ForbiddenException('Only the employee can cancel');
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Only PENDING requests can be cancelled');
     }
 
-    const updated = await this.prisma.request.update({
-      where: { id },
-      data: { status: 'CANCELLED', completedAt: new Date() },
-      include: {
-        department: { select: { code: true, name: true } },
-        requestType: { select: { code: true, name: true } },
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.request.update({
+        where: { id },
+        data: { status: 'CANCELLED', completedAt: new Date() },
+        include: {
+          department: { select: { code: true, name: true } },
+          requestType: { select: { code: true, name: true } },
+        },
+      });
 
-    await this.prisma.auditLog.create({
-      data: {
-        requestId: id,
-        actorId: user.sub,
-        action: 'REQUEST_CANCELLED',
-        oldValue: request.status,
-        newValue: 'CANCELLED',
-      },
-    });
+      await tx.auditLog.create({
+        data: {
+          requestId: id,
+          actorId: user.sub,
+          action: 'REQUEST_CANCELLED',
+          oldValue: request.status,
+          newValue: 'CANCELLED',
+        },
+      });
 
-    return updated;
+      return updated;
+    });
   }
 }

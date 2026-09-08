@@ -8,21 +8,14 @@ export class DepartmentsService {
 
   constructor(private readonly prisma: ScopedPrismaService) {}
 
-  /**
-   * List active departments in the authenticated user's company.
-   * The ScopedPrismaService middleware auto-filters by companyId.
-   */
   async listActive(user: AuthUser) {
     return this.prisma.department.findMany({
       where: { active: true },
-      include: { requestTypes: true },
+      include: { requestTypes: { where: { active: true } } },
       orderBy: { name: 'asc' },
     });
   }
 
-  /**
-   * Get a single department by companyId + code composite key.
-   */
   async getDepartment(companyId: string, code: string) {
     const dept = await this.prisma.department.findUnique({
       where: { companyId_code: { companyId, code } },
@@ -34,21 +27,47 @@ export class DepartmentsService {
     return dept;
   }
 
-  /**
-   * Assert the user is a member of the given department.
-   */
   async assertMemberOf(user: AuthUser, departmentId: string) {
-    const member = await this.prisma.departmentMember.findUnique({
-      where: { departmentId_userId: { departmentId, userId: user.sub } },
+    const member = await this.prisma.departmentMember.findFirst({
+      where: {
+        departmentId,
+        userId: user.sub,
+        active: true,
+      },
     });
     if (!member && user.role !== 'SYSTEM_ADMIN') {
-      throw new NotFoundException('You are not a member of this department');
+      throw new NotFoundException('You are not an active member of this department');
     }
+  }
+
+  async isMemberOf(user: AuthUser, departmentId: string): Promise<boolean> {
+    if (user.role === 'SYSTEM_ADMIN') return true;
+    const member = await this.prisma.departmentMember.findFirst({
+      where: {
+        departmentId,
+        userId: user.sub,
+        active: true,
+      },
+    });
+    return !!member;
+  }
+
+  async isManagerOf(user: AuthUser, departmentId: string): Promise<boolean> {
+    if (user.role === 'SYSTEM_ADMIN') return true;
+    const member = await this.prisma.departmentMember.findFirst({
+      where: {
+        departmentId,
+        userId: user.sub,
+        departmentRole: 'MANAGER',
+        active: true,
+      },
+    });
+    return !!member;
   }
 
   async getMemberships(user: AuthUser) {
     return this.prisma.departmentMember.findMany({
-      where: { userId: user.sub },
+      where: { userId: user.sub, active: true },
       include: {
         department: {
           select: { id: true, code: true, name: true, description: true, active: true },

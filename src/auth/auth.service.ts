@@ -305,11 +305,23 @@ export class AuthService {
   }
 
   async verifyToken(token: string): Promise<AuthUser> {
+    let payload: AuthUser;
     try {
-      return await this.jwtService.verifyAsync<AuthUser>(token);
+      payload = await this.jwtService.verifyAsync<AuthUser>(token);
     } catch {
       throw new UnauthorizedException('Invalid token');
     }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, active: true },
+    });
+
+    if (!user || !user.active) {
+      throw new UnauthorizedException('User account is deactivated or no longer exists');
+    }
+
+    return payload;
   }
 
   async logout(refreshToken?: string): Promise<void> {

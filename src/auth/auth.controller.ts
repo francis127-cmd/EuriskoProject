@@ -7,6 +7,7 @@ import { CurrentUser } from './current-user.decorator';
 import { AuthUser } from './auth.service';
 import { Roles } from './roles.decorator';
 import { PlatformRole } from '@prisma/client';
+import { Public } from './public.decorator';
 
 class DiscoverDto {
   @IsEmail()
@@ -104,6 +105,7 @@ export class AuthController {
     private readonly mfaService: MfaService,
   ) {}
 
+  @Public()
   @Post('discover')
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -111,6 +113,7 @@ export class AuthController {
     return this.authService.discover(dto.email);
   }
 
+  @Public()
   @Post('login')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -120,6 +123,7 @@ export class AuthController {
     return this.authService.loginPassword(dto.email, dto.password, dto.companySlug, ip, userAgent);
   }
 
+  @Public()
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 300000 } })
   async register(@Body() dto: RegisterDto, @Req() req: any) {
@@ -128,6 +132,7 @@ export class AuthController {
     return this.authService.registerPassword(dto, ip, userAgent);
   }
 
+  @Public()
   @Post('google')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -137,6 +142,7 @@ export class AuthController {
     return this.authService.loginGoogle(dto.idToken, ip, userAgent);
   }
 
+  @Public()
   @Post('accept-invite')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -146,6 +152,7 @@ export class AuthController {
     return this.authService.acceptInvite(dto.token, dto.password, ip, userAgent);
   }
 
+  @Public()
   @Post('refresh')
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -169,6 +176,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Public()
   @Post('mfa/challenge')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -182,7 +190,6 @@ export class AuthController {
   @Roles(PlatformRole.SYSTEM_ADMIN, PlatformRole.EMPLOYEE)
   @HttpCode(HttpStatus.OK)
   async mfaSetup(@CurrentUser() user: AuthUser) {
-    const company = await this.authService.verifyToken('').then(() => null).catch(() => null);
     return this.mfaService.generateMfaSecret(user.sub, user.email, user.name || 'Internal Hub');
   }
 
@@ -215,6 +222,7 @@ export class AuthController {
     return { backupCodes };
   }
 
+  @Public()
   @Get('invitations/:token')
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async validateInviteToken(@Param('token') token: string) {
