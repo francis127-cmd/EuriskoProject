@@ -41,7 +41,7 @@ export class AuthService {
 
     const existingUser = await this.prisma.user.findFirst({
       where: { email },
-      select: { id: true, companyId: true, company: { select: { slug: true, name: true, authMode: true, googleClientId: true } } },
+      select: { id: true, companyId: true, company: { select: { slug: true, name: true, authMode: true, ssoProvider: true, googleClientId: true } } },
     });
 
     if (existingUser) {
@@ -51,6 +51,8 @@ export class AuthService {
         companySlug: existingUser.company.slug,
         companyName: existingUser.company.name,
         companyId: existingUser.companyId,
+        provider: existingUser.company.ssoProvider,
+        googleClientId: existingUser.company.googleClientId,
       };
     }
 

@@ -11,6 +11,7 @@ export class AdminService {
 
   async listUsers(admin: AuthUser) {
     return this.prisma.user.findMany({
+      where: { companyId: admin.companyId },
       include: {
         memberships: {
           include: { department: { select: { code: true, name: true } } },
@@ -76,7 +77,7 @@ export class AdminService {
 
   async listDepartments(admin: AuthUser) {
     return this.prisma.department.findMany({
-      where: { active: true },
+      where: { active: true, companyId: admin.companyId },
       select: { id: true, code: true, name: true },
       orderBy: { name: 'asc' },
     });

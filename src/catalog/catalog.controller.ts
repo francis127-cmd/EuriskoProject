@@ -10,7 +10,7 @@ export class CatalogController {
   @Get()
   async getCatalog(@CurrentUser() user: AuthUser) {
     const departments = await this.prisma.department.findMany({
-      where: { active: true },
+      where: { active: true, companyId: user.companyId },
       include: { requestTypes: true },
       orderBy: { name: 'asc' },
     });

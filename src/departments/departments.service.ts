@@ -10,7 +10,7 @@ export class DepartmentsService {
 
   async listActive(user: AuthUser) {
     return this.prisma.department.findMany({
-      where: { active: true },
+      where: { active: true, companyId: user.companyId },
       include: { requestTypes: { where: { active: true } } },
       orderBy: { name: 'asc' },
     });
