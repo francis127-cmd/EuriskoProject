@@ -239,8 +239,17 @@ export class AuthService {
       throw new UnauthorizedException('No email in Google token');
     }
 
+    const emailDomain = payload.email.split('@')[1]?.toLowerCase();
+    const companyDomain = payload.hd?.toLowerCase() || emailDomain;
+    const company = companyDomain
+      ? await this.prisma.company.findFirst({ where: { domain: companyDomain } })
+      : null;
+    if (!company) {
+      throw new UnauthorizedException('No company is configured for this Google account');
+    }
+
     const user = await this.prisma.user.findFirst({
-      where: { email: payload.email },
+      where: { companyId: company.id, email: payload.email.toLowerCase() },
     });
 
     if (!user) {
@@ -253,13 +262,12 @@ export class AuthService {
       throw new UnauthorizedException('Account deactivated');
     }
 
-    const company = await this.prisma.company.findUnique({ where: { id: user.companyId } });
-
-    if (company?.authMode === 'SSO' && company?.domain) {
-      if (payload.hd && payload.hd !== company.domain) {
-        this.logger.warn(`[${requestId}] Google login: hd mismatch email=${payload.email} hd=${payload.hd} expected=${company.domain}`);
-        throw new UnauthorizedException('Email domain does not match company domain');
-      }
+    if (company.authMode !== 'SSO') {
+      throw new UnauthorizedException('Google sign-in is not enabled for this company');
+    }
+    if (company.domain && emailDomain !== company.domain.toLowerCase()) {
+      this.logger.warn(`[${requestId}] Google login: domain mismatch email=${payload.email} expected=${company.domain}`);
+      throw new UnauthorizedException('Email domain does not match company domain');
     }
 
     this.logger.log(`[${requestId}] Google login OK: email=${payload.email} company=${company?.slug}`);
@@ -273,7 +281,9 @@ export class AuthService {
     if (!invitation) throw new BadRequestException('Invalid invitation token');
     if (invitation.expiresAt < new Date()) throw new BadRequestException('Invitation has expired');
 
-    const existing = await this.prisma.user.findFirst({ where: { email: invitation.email } });
+    const existing = await this.prisma.user.findFirst({
+      where: { companyId: invitation.companyId, email: invitation.email.toLowerCase() },
+    });
     if (existing) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(password, 12);
