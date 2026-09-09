@@ -29,9 +29,10 @@ class RegisterCompanyDto {
   @IsEmail()
   adminEmail: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(6)
-  adminPassword: string;
+  adminPassword?: string;
 }
 
 class UpdateCompanyDto {
