@@ -9,6 +9,7 @@ import { RefreshTokenService } from './refresh-token.service';
 import { MfaService } from './mfa.service';
 import { OidcFederationService } from './oidc-federation.service';
 import { OidcFederationController } from './oidc-federation.controller';
+import { OidcController } from './oidc.controller';
 import { JwtGuard } from './jwt.guard';
 import { RolesGuard } from './roles.guard';
 import { AdminPrismaService } from '../admin-prisma.service';
@@ -21,7 +22,7 @@ import { AdminPrismaService } from '../admin-prisma.service';
       signOptions: { expiresIn: '15m' },
     }),
   ],
-  controllers: [AuthController, InvitationController, OidcFederationController],
+  controllers: [AuthController, InvitationController, OidcFederationController, OidcController],
   providers: [
     AuthService,
     InvitationService,
