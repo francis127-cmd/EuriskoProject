@@ -4,23 +4,32 @@ import * as nodemailer from 'nodemailer';
 /**
  * Optional transactional email sender.
  *
- * Enabled only when SMTP_HOST, SMTP_USER and SMTP_PASS are set.
- * When disabled, callers must fall back to manual delivery (e.g. the
- * admin shares the invitation code from the mobile app) — send methods
- * return false instead of throwing so auth flows never break.
+ * Two providers, in order of preference:
+ *  1. Brevo HTTP API (BREVO_API_KEY) — port 443, works from networks that
+ *     block outbound SMTP (Render cannot reach smtp.gmail.com:587).
+ *  2. SMTP (SMTP_HOST/USER/PASS) — kept as fallback.
+ * When neither is configured, callers must fall back to manual delivery
+ * (e.g. the admin shares the invitation code from the mobile app) — send
+ * methods return a status instead of throwing so auth flows never break.
  */
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private transporter: nodemailer.Transporter | null = null;
   private readonly from: string;
+  private readonly brevoKey: string | undefined;
 
   constructor() {
     const host = process.env['SMTP_HOST'];
     const port = Number(process.env['SMTP_PORT'] || 587);
     const user = process.env['SMTP_USER'];
     const pass = process.env['SMTP_PASS'];
-    this.from = process.env['SMTP_FROM'] || user || 'no-reply@internal-ops-hub.local';
+    this.from = process.env['SMTP_FROM'] || process.env['EMAIL_FROM'] || user || 'no-reply@internal-ops-hub.local';
+    this.brevoKey = process.env['BREVO_API_KEY'] || undefined;
+
+    if (this.brevoKey) {
+      this.logger.log('Brevo HTTP email enabled');
+    }
 
     if (host && user && pass) {
       this.transporter = nodemailer.createTransport({
@@ -39,7 +48,39 @@ export class EmailService {
   }
 
   get enabled(): boolean {
-    return !!this.transporter;
+    return !!this.transporter || !!this.brevoKey;
+  }
+
+  private async sendViaBrevo(email: string, companyName: string, token: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'api-key': this.brevoKey as string },
+        body: JSON.stringify({
+          sender: { email: this.from === 'no-reply@internal-ops-hub.local' ? undefined : this.from, name: 'Internal Operations Hub' },
+          to: [{ email }],
+          subject: `You've been invited to join ${companyName}`,
+          textContent:
+            `You've been invited to join ${companyName} on Internal Operations Hub.\n\n` +
+            `Open the app, tap "Have an invitation code?" on the login screen, and enter this code:\n\n${token}\n\n` +
+            `You will set your own password on that screen. This code expires in 7 days.`,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        this.logger.error(`Brevo rejected invitation email to ${email}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+        return false;
+      }
+      this.logger.log(`Invitation email sent to ${email} via Brevo`);
+      return true;
+    } catch (e) {
+      this.logger.error(`Brevo send to ${email} failed: ${(e as Error).message}`);
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async sendInvitation(
@@ -47,6 +88,12 @@ export class EmailService {
     companyName: string,
     token: string,
   ): Promise<{ sent: boolean; reason: 'disabled' | 'timeout' | 'error' | null }> {
+    if (this.brevoKey) {
+      const ok = await this.sendViaBrevo(email, companyName, token);
+      return ok
+        ? { sent: true, reason: null }
+        : { sent: false, reason: 'error' };
+    }
     if (!this.transporter) return { sent: false, reason: 'disabled' };
     // Never let a slow mail server hang the request: the mobile client
     // aborts at 12s, which surfaces as a confusing "network error".
