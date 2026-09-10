@@ -3,11 +3,13 @@ import {
   NotFoundException,
   BadRequestException,
   ServiceUnavailableException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { ScopedPrismaService } from '../scoped-prisma.service';
 import { S3Service } from './s3.service';
 import { DepartmentsService } from '../departments/departments.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthUser } from '../auth/auth.service';
 import { createHash } from 'crypto';
 
@@ -30,6 +32,7 @@ export class DocumentsService {
     private readonly prisma: ScopedPrismaService,
     private readonly s3: S3Service,
     private readonly departments: DepartmentsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -55,6 +58,35 @@ export class DocumentsService {
     return i >= 0 ? name.slice(i).toLowerCase() : '';
   }
 
+  /**
+   * Document authorization (least privilege, product-spec section 3/6).
+   *
+   * Documents are resolution artifacts owned by the claim workflow:
+   * - SYSTEM_ADMIN: everything.
+   * - Claiming agent and department managers: upload / download / delete.
+   * - Requesting employee: download only once the request is COMPLETED or
+   *   REJECTED (their resolution). Never upload or delete.
+   * - Any other department member: no document access, even in the same
+   *   department. Reading the request does not imply reading its files.
+   */
+  private async assertDocAccess(
+    request: { id: string; employeeId: string; departmentId: string; status: string; claimedBy: string | null },
+    user: AuthUser,
+    op: 'read' | 'write',
+  ): Promise<void> {
+    if (user.role === 'SYSTEM_ADMIN') return;
+    if (request.claimedBy === user.sub) return;
+    if (await this.departments.isManagerOf(user, request.departmentId)) return;
+    if (
+      op === 'read' &&
+      request.employeeId === user.sub &&
+      (request.status === 'COMPLETED' || request.status === 'REJECTED')
+    ) {
+      return;
+    }
+    throw new ForbiddenException('You do not have access to this document');
+  }
+
   async upload(
     requestId: string,
     file: { buffer: Buffer; originalname: string; mimetype?: string },
@@ -70,9 +102,7 @@ export class DocumentsService {
     if (!request.claimedBy) {
       throw new BadRequestException('Request must be claimed before uploading documents');
     }
-    if (user.role !== 'SYSTEM_ADMIN') {
-      await this.departments.assertMemberOf(user, request.departmentId);
-    }
+    await this.assertDocAccess(request, user, 'write');
 
     const ext = this.ext(file.originalname);
     if (!ALLOWED_EXT.has(ext)) {
@@ -131,6 +161,12 @@ export class DocumentsService {
           metadata: { filename: file.originalname, checksum, byteSize: file.buffer.byteLength },
         },
       });
+      await this.notifications.emit(tx, {
+        requestId,
+        eventType: 'document.uploaded',
+        payload: { documentId: created.id, filename: file.originalname, actorId: user.sub },
+        idempotencyKey: `doc-${created.id}-uploaded`,
+      });
       return created;
     });
 
@@ -152,9 +188,7 @@ export class DocumentsService {
     if (!request || request.department.companyId !== user.companyId) {
       throw new NotFoundException('Request not found');
     }
-    if (user.role !== 'SYSTEM_ADMIN' && request.employeeId !== user.sub) {
-      await this.departments.assertMemberOf(user, request.departmentId);
-    }
+    await this.assertDocAccess(request, user, 'read');
 
     const doc = await this.prisma.document.findFirst({ where: { requestId, deletedAt: null } });
     if (!doc) throw new NotFoundException('No document attached');
@@ -173,6 +207,9 @@ export class DocumentsService {
     try {
       downloaded = await this.s3.download(doc.storageKey);
     } catch (e) {
+      if ((e as any)?.name === 'NoSuchKey' || (e as Error).message?.includes('NoSuchKey')) {
+        throw new NotFoundException('Document is no longer available');
+      }
       this.logger.error(`Document storage download failed: ${(e as Error).message}`);
       throw new ServiceUnavailableException('Document storage is temporarily unavailable. Please try again.');
     }
@@ -194,9 +231,7 @@ export class DocumentsService {
     if (!request || request.department.companyId !== user.companyId) {
       throw new NotFoundException('Request not found');
     }
-    if (user.role !== 'SYSTEM_ADMIN') {
-      await this.departments.assertMemberOf(user, request.departmentId);
-    }
+    await this.assertDocAccess(request, user, 'write');
 
     const doc = await this.prisma.document.findFirst({ where: { requestId, deletedAt: null } });
     if (!doc) throw new NotFoundException('No document attached');
@@ -212,7 +247,9 @@ export class DocumentsService {
     await this.prisma.$transaction(async (tx) => {
       await tx.document.update({
         where: { id: doc.id },
-        data: { deletedAt: new Date(), storageKey: `deleted/${doc.storageKey}` },
+        // Clear bytes as well as the key: deletion must remove the payload
+        // (acceptance criterion 8), not just hide the row.
+        data: { deletedAt: new Date(), storageKey: `deleted/${doc.storageKey}`, data: null },
       });
       await tx.auditLog.create({
         data: {
@@ -222,6 +259,12 @@ export class DocumentsService {
           oldValue: doc.storageKey,
           metadata: { filename: doc.originalFilename },
         },
+      });
+      await this.notifications.emit(tx, {
+        requestId,
+        eventType: 'document.deleted',
+        payload: { documentId: doc.id, actorId: user.sub },
+        idempotencyKey: `doc-${doc.id}-deleted`,
       });
     });
 

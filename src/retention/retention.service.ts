@@ -32,18 +32,22 @@ export class RetentionService {
 
     for (const doc of expired) {
       try {
-        await this.s3.delete(doc.storageKey);
+        // DB-backed documents have no external object; S3-backed ones do.
+        // Either way the payload must actually go away (acceptance 8/11).
+        if (!doc.data) {
+          await this.s3.delete(doc.storageKey);
+        }
         await this.prisma.document.update({
           where: { id: doc.id },
-          data: { deletedAt: new Date(), storageKey: `purged/${doc.storageKey}` },
+          data: { deletedAt: new Date(), storageKey: `purged/${doc.storageKey}`, data: null },
         });
         await this.prisma.auditLog.create({
           data: {
             requestId: doc.requestId,
-            actorId: 'system',
+            actorId: null,
             action: 'DOCUMENT_PURGED',
             oldValue: doc.storageKey,
-            metadata: { reason: 'retention_policy', byteSize: doc.byteSize },
+            metadata: { actor: 'system', reason: 'retention_policy', byteSize: doc.byteSize },
           },
         });
         successCount++;

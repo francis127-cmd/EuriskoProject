@@ -196,7 +196,7 @@ model Document {
 model AuditLog {
   id        String   @id @default(uuid())
   requestId String?
-  actorId   String
+  actorId   String?
   action    String
   oldValue  String?
   newValue  String?
@@ -204,7 +204,7 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   request Request? @relation(fields: [requestId], references: [id])
-  actor   User     @relation(fields: [actorId], references: [id])
+  actor   User?     @relation(fields: [actorId], references: [id])
 
   @@index([requestId])
   @@index([actorId])
@@ -298,4 +298,20 @@ model OidcProvider {
 
   @@unique([companyId, name])
   @@map("OidcProvider")
+}
+
+model NotificationEvent {
+  id             String    @id @default(uuid())
+  requestId      String?
+  eventType      String
+  payload        Json
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  lastError      String?
+  idempotencyKey String    @unique
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+
+  @@index([status, createdAt])
+  @@map("NotificationEvent")
 }

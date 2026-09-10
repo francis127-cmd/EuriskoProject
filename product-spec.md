@@ -6,7 +6,7 @@ The Internal Operations Service Hub gives employees one reliable place to reques
 
 ### Known facts and constraints
 
-- The system is internal-only and uses company SSO.
+- The system is internal-only and uses company SSO or email/password, per company policy.
 - Employees should not need to know which department owns a request type; routing derives ownership from the catalog.
 - A request belongs to exactly one department and one request type at a time.
 - Department membership is independent from platform role.
@@ -58,7 +58,7 @@ The Internal Operations Service Hub gives employees one reliable place to reques
 | Department manager | All agent permissions plus manage department members and request types and re-route requests within policy |
 | System administrator | Configure all departments, members, catalogs, and requests; access cross-department reporting |
 
-Users authenticate through company SSO. Department membership is separate from the platform role, so one person may be an agent in more than one department.
+Users authenticate through company SSO or email/password depending on company policy. Department membership is separate from the platform role, so one person may be an agent in more than one department.
 
 ## 4. Initial department catalog
 

@@ -1,12 +1,19 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import { ScopedPrismaService } from '../scoped-prisma.service';
 import { DepartmentsService } from '../departments/departments.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthUser } from '../auth/auth.service';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
   IN_PROGRESS: ['COMPLETED', 'REJECTED'],
 };
+
+// Postgres native enums sort by declaration order (LOW, STANDARD, URGENT),
+// so URGENT-first queue ordering (acceptance criterion 10) requires DESC.
+const QUEUE_ORDER = [{ priority: 'desc' as const }, { createdAt: 'asc' as const }];
+
+const AGENT_SELECT = { agent: { select: { id: true, displayName: true, email: true } } };
 
 @Injectable()
 export class RequestsService {
@@ -15,6 +22,7 @@ export class RequestsService {
   constructor(
     private readonly prisma: ScopedPrismaService,
     private readonly departments: DepartmentsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async listMyRequests(user: AuthUser) {
@@ -23,6 +31,7 @@ export class RequestsService {
       include: {
         department: { select: { code: true, name: true } },
         requestType: { select: { code: true, name: true } },
+        ...AGENT_SELECT,
         documents: { where: { deletedAt: null }, select: { id: true, originalFilename: true, mimeType: true, byteSize: true, checksum: true, createdAt: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -54,11 +63,9 @@ export class RequestsService {
             department: { select: { code: true, name: true } },
             requestType: { select: { code: true, name: true } },
             employee: { select: { id: true, displayName: true, email: true } },
+            ...AGENT_SELECT,
           },
-          orderBy: [
-            { priority: 'asc' },
-            { createdAt: 'asc' },
-          ],
+          orderBy: QUEUE_ORDER,
         });
       }
     }
@@ -72,11 +79,9 @@ export class RequestsService {
         department: { select: { code: true, name: true } },
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
+        ...AGENT_SELECT,
       },
-      orderBy: [
-        { priority: 'asc' },
-        { createdAt: 'asc' },
-      ],
+      orderBy: QUEUE_ORDER,
     });
   }
 
@@ -87,6 +92,7 @@ export class RequestsService {
         department: { select: { code: true, name: true } },
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
+        ...AGENT_SELECT,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -99,6 +105,7 @@ export class RequestsService {
         department: { select: { id: true, code: true, name: true, companyId: true } },
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
+        ...AGENT_SELECT,
         documents: { where: { deletedAt: null }, select: { id: true, originalFilename: true, mimeType: true, byteSize: true, checksum: true, createdAt: true } },
         auditLogs: { orderBy: { createdAt: 'desc' }, take: 20 },
       },
@@ -172,6 +179,13 @@ export class RequestsService {
         },
       });
 
+      await this.notifications.emit(tx, {
+        requestId: req.id,
+        eventType: 'request.created',
+        payload: { departmentId: dept.id, requestTypeId: rt.id, priority: req.priority, title: req.title },
+        idempotencyKey: `req-${req.id}-created`,
+      });
+
       return req;
     });
 
@@ -220,12 +234,23 @@ export class RequestsService {
       },
     });
 
+    await this.prisma.notificationEvent.create({
+      data: {
+        requestId: id,
+        eventType: 'request.claimed',
+        payload: { claimedBy: user.sub } as any,
+        status: 'PENDING',
+        idempotencyKey: `req-${id}-claimed-${user.sub}`,
+      },
+    });
+
     return this.prisma.request.findUnique({
       where: { id },
       include: {
         department: { select: { code: true, name: true } },
         requestType: { select: { code: true, name: true } },
         employee: { select: { id: true, displayName: true, email: true } },
+        ...AGENT_SELECT,
       },
     });
   }
@@ -275,12 +300,22 @@ export class RequestsService {
         data.completedAt = new Date();
       }
 
-      const updated = await tx.request.update({
-        where: { id },
+      // Guard the state precondition inside the transaction: a concurrent
+      // transition racing us updates zero rows instead of clobbering state.
+      const guarded = await tx.request.updateMany({
+        where: { id, status: request.status },
         data,
+      });
+      if (guarded.count === 0) {
+        throw new ConflictException('Request changed concurrently, please reload and retry');
+      }
+
+      const updated = await tx.request.findUnique({
+        where: { id },
         include: {
           department: { select: { code: true, name: true } },
           requestType: { select: { code: true, name: true } },
+          ...AGENT_SELECT,
         },
       });
 
@@ -297,6 +332,13 @@ export class RequestsService {
               ? { rejectionReason: dto.rejectionReason }
               : undefined,
         },
+      });
+
+      await this.notifications.emit(tx, {
+        requestId: id,
+        eventType: `request.${dto.status.toLowerCase()}`,
+        payload: { from: request.status, to: dto.status, actorId: user.sub },
+        idempotencyKey: `req-${id}-${dto.status}-${request.status}`,
       });
 
       return updated;
@@ -318,6 +360,7 @@ export class RequestsService {
         include: {
           department: { select: { code: true, name: true } },
           requestType: { select: { code: true, name: true } },
+          ...AGENT_SELECT,
         },
       });
 
@@ -329,6 +372,13 @@ export class RequestsService {
           oldValue: request.status,
           newValue: 'CANCELLED',
         },
+      });
+
+      await this.notifications.emit(tx, {
+        requestId: id,
+        eventType: 'request.cancelled',
+        payload: { actorId: user.sub },
+        idempotencyKey: `req-${id}-cancelled`,
       });
 
       return updated;

@@ -46,11 +46,11 @@ Every request type belongs to exactly one department. An IT laptop request is th
 
 ## Documentation
 
-* `docs/product-spec.md` - Product scope, actors, stakeholders, functional and non-functional requirements, and acceptance criteria.
-* `docs/data-model.md` - Entities, constraints, state machine, authorization rules, and indexes.
-* `docs/architecture.md` - Components, trust boundaries, flows, failure handling, and operational controls.
-* `docs/decisions/ADR-001.md` - Decision to store document payloads outside the relational database.
+* `product-spec.md` - Product scope, actors, stakeholders, functional and non-functional requirements, and acceptance criteria.
+* `data-model.md` - Entities, constraints, state machine, authorization rules, and indexes.
+* `architecture.md` - Components, trust boundaries, flows, failure handling, and operational controls.
+* `ADR-001.md` - Decision to store document payloads outside the relational database.
 
 ## Current repository status
 
-This repository currently contains the finalized product and technical specifications. Application code, migrations, and deployment configuration are intentionally not included in this specification phase.
+This repository contains the full implementation: NestJS API (`src/`), Prisma schema and migrations (`prisma/`), Dockerfile/Render deployment config, and the companion Expo mobile app (separate `hr-mobile` repo). Notifications are delivered through a durable outbox + worker (`src/notifications/`); configure `NOTIFY_WEBHOOK_URL` to route events to Firebase or any webhook. Document payloads live in private object storage when `MINIO_ENDPOINT` is configured, otherwise in Postgres bytea (see ADR-001 amendment below).

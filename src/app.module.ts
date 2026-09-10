@@ -10,6 +10,7 @@ import { RequestsModule } from './requests/requests.module';
 import { DocumentsModule } from './documents/documents.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { RetentionModule } from './retention/retention.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { AdminModule } from './admin/admin.module';
 import { CompaniesModule } from './companies/companies.module';
 import { DomainsModule } from './domains/domains.module';
@@ -33,6 +34,7 @@ import { AppController } from './app.controller';
     DocumentsModule,
     CatalogModule,
     RetentionModule,
+    NotificationsModule,
     AdminModule,
     CompaniesModule,
     DomainsModule,
