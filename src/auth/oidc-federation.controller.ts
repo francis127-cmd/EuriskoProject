@@ -1,11 +1,13 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, HttpCode, HttpStatus, Req, NotFoundException } from '@nestjs/common';
 import { OidcFederationService } from './oidc-federation.service';
 import { CurrentUser } from './current-user.decorator';
 import { AuthUser } from './auth.service';
 import { Public } from './public.decorator';
+import { Throttle } from '@nestjs/throttler';
 import { IsNotEmpty, IsString, IsOptional, IsBoolean } from 'class-validator';
 import { Roles } from './roles.decorator';
 import { PlatformRole } from '@prisma/client';
+import { AdminPrismaService } from '../admin-prisma.service';
 
 class CreateOidcProviderDto {
   @IsString()
@@ -67,9 +69,54 @@ class UpdateOidcProviderDto {
   active?: boolean;
 }
 
+class OidcAuthorizeDto {
+  @IsString()
+  @IsNotEmpty()
+  companySlug: string;
+
+  @IsString()
+  @IsNotEmpty()
+  providerName: string;
+
+  @IsOptional()
+  @IsString()
+  redirectUri?: string;
+}
+
+class OidcCallbackDto {
+  @IsString()
+  @IsNotEmpty()
+  companySlug: string;
+
+  @IsString()
+  @IsNotEmpty()
+  providerName: string;
+
+  @IsString()
+  @IsNotEmpty()
+  code: string;
+
+  @IsString()
+  @IsNotEmpty()
+  codeVerifier: string;
+
+  @IsString()
+  @IsNotEmpty()
+  state: string;
+}
+
 @Controller('oidc')
 export class OidcFederationController {
-  constructor(private readonly oidcService: OidcFederationService) {}
+  constructor(
+    private readonly oidcService: OidcFederationService,
+    private readonly adminPrisma: AdminPrismaService,
+  ) {}
+
+  private async resolveCompanyId(companySlug: string): Promise<string> {
+    const company = await this.adminPrisma.company.findUnique({ where: { slug: companySlug } });
+    if (!company) throw new NotFoundException('Company not found');
+    return company.id;
+  }
 
   @Get('providers')
   @Roles(PlatformRole.SYSTEM_ADMIN)
@@ -110,36 +157,33 @@ export class OidcFederationController {
   @Public()
   @Get('discover/:companySlug')
   async discoverProviders(@Param('companySlug') companySlug: string) {
-    const { AdminPrismaService } = await import('../admin-prisma.service');
-    const prisma = new AdminPrismaService();
-    const company = await prisma.company.findUnique({ where: { slug: companySlug } });
-    if (!company) return { providers: [] };
-    return this.oidcService.discoverProviders(company.id);
+    return this.oidcService.discoverProviders(await this.resolveCompanyId(companySlug));
   }
 
+  @Public()
   @Post('authorize')
-  @Roles(PlatformRole.SYSTEM_ADMIN, PlatformRole.EMPLOYEE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
-  async initiateLogin(
-    @CurrentUser() user: AuthUser,
-    @Body() body: { providerName: string },
-  ) {
-    return this.oidcService.initiateOidcLogin(user.companyId, body.providerName);
+  async initiateLogin(@Body() body: OidcAuthorizeDto) {
+    return this.oidcService.initiateOidcLogin(
+      await this.resolveCompanyId(body.companySlug),
+      body.providerName,
+      body.redirectUri,
+    );
   }
 
   @Public()
   @Post('callback')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
-  async handleCallback(
-    @Body() body: { companyId: string; providerName: string; code: string; state: string },
-    @Req() req: any,
-  ) {
+  async handleCallback(@Body() body: OidcCallbackDto, @Req() req: any) {
     const ip = req.ip || req.headers['x-forwarded-for'];
     const userAgent = req.headers['user-agent'];
     return this.oidcService.handleOidcCallback(
-      body.companyId,
+      await this.resolveCompanyId(body.companySlug),
       body.providerName,
       body.code,
+      body.codeVerifier,
       body.state,
       ip,
       userAgent,

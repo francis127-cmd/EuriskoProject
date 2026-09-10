@@ -37,7 +37,11 @@ export class OidcFederationService {
     };
   }
 
-  async initiateOidcLogin(companyId: string, providerName: string): Promise<{
+  async initiateOidcLogin(
+    companyId: string,
+    providerName: string,
+    redirectUri?: string,
+  ): Promise<{
     authorizationUrl: string;
     state: string;
     codeVerifier: string;
@@ -47,31 +51,123 @@ export class OidcFederationService {
     });
     if (!provider) throw new NotFoundException('OIDC provider not found');
 
-    const state = crypto.randomBytes(32).toString('hex');
+    // The IdP enforces its own registered redirect URIs; we additionally
+    // allow only the registered URI or our native-app scheme.
+    const finalRedirectUri = redirectUri || provider.redirectUri;
+    if (finalRedirectUri !== provider.redirectUri && !finalRedirectUri.startsWith('eurisko-hub://')) {
+      throw new BadRequestException('Invalid redirect URI for this provider');
+    }
+
+    const state = this.jwtService.sign(
+      { type: 'oidc_state', jti: crypto.randomBytes(16).toString('hex'), companyId, providerName },
+      { expiresIn: '10m' },
+    );
     const codeVerifier = crypto.randomBytes(32).toString('hex');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    const discovery = await this.fetchDiscovery(provider);
+    const authorizationEndpoint =
+      discovery.authorization_endpoint ||
+      `${provider.discoveryUrl.replace('/.well-known/openid-configuration', '')}/authorize`;
 
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: provider.clientId,
-      redirect_uri: provider.redirectUri,
+      redirect_uri: finalRedirectUri,
       scope: provider.scopes,
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
     });
 
-    const authorizationUrl = `${provider.discoveryUrl.replace('/.well-known/openid-configuration', '')}/authorize?${params.toString()}`;
+    const authorizationUrl = `${authorizationEndpoint}?${params.toString()}`;
 
     this.logger.log(`OIDC login initiated: provider=${providerName} company=${companyId}`);
 
     return { authorizationUrl, state, codeVerifier };
   }
 
+  private async fetchDiscovery(provider: { discoveryUrl: string }): Promise<any> {
+    let response: Response;
+    try {
+      response = await fetch(provider.discoveryUrl, { signal: AbortSignal.timeout(10000) });
+    } catch (e: any) {
+      throw new BadRequestException(`Identity provider unreachable: ${e.message}`);
+    }
+    if (!response.ok) {
+      throw new BadRequestException('Identity provider discovery failed');
+    }
+    return response.json();
+  }
+
+  private async verifyIdToken(provider: { clientId: string; issuer: string }, discovery: any, idToken: string): Promise<any> {
+    const parts = idToken.split('.');
+    if (parts.length !== 3) throw new UnauthorizedException('Malformed identity token');
+    const [headerB64, payloadB64, signatureB64] = parts;
+
+    let header: any;
+    try {
+      header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    } catch {
+      throw new UnauthorizedException('Malformed identity token header');
+    }
+    if ((header.alg !== 'RS256' && header.alg !== 'ES256') || !header.kid) {
+      throw new UnauthorizedException('Unsupported identity token algorithm');
+    }
+    if (!discovery.jwks_uri) throw new UnauthorizedException('Identity provider has no JWKS endpoint');
+
+    let jwks: any;
+    try {
+      const res = await fetch(discovery.jwks_uri, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      jwks = await res.json();
+    } catch (e: any) {
+      throw new UnauthorizedException(`Identity provider key fetch failed: ${e.message}`);
+    }
+    const jwk = (jwks.keys || []).find((k: any) => k.kid === header.kid);
+    if (!jwk) throw new UnauthorizedException('Unknown identity token signing key');
+
+    let signatureValid = false;
+    try {
+      const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+      signatureValid = crypto.verify(
+        'sha256',
+        Buffer.from(`${headerB64}.${payloadB64}`),
+        publicKey,
+        Buffer.from(signatureB64, 'base64url'),
+      );
+    } catch {
+      throw new UnauthorizedException('Identity token signature check failed');
+    }
+    if (!signatureValid) throw new UnauthorizedException('Invalid identity token signature');
+
+    let payload: any;
+    try {
+      payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    } catch {
+      throw new UnauthorizedException('Malformed identity token payload');
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const expectedIssuers = [discovery.issuer, provider.issuer].filter(Boolean);
+    if (!expectedIssuers.includes(payload.iss)) {
+      throw new UnauthorizedException('Invalid identity token issuer');
+    }
+    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!audiences.includes(provider.clientId)) {
+      throw new UnauthorizedException('Identity token was not issued for this app');
+    }
+    if (typeof payload.exp !== 'number' || payload.exp <= now) {
+      throw new UnauthorizedException('Expired identity token');
+    }
+    return payload;
+  }
+
   async handleOidcCallback(
     companyId: string,
     providerName: string,
     code: string,
+    codeVerifier: string,
     state: string,
     ip?: string,
     userAgent?: string,
@@ -83,15 +179,34 @@ export class OidcFederationService {
   }> {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
 
+    // Stateless CSRF protection: state is a short-lived JWT minted by
+    // initiateOidcLogin and must match this company + provider.
+    try {
+      const statePayload: any = await this.jwtService.verifyAsync(state);
+      if (
+        statePayload.type !== 'oidc_state' ||
+        statePayload.companyId !== companyId ||
+        statePayload.providerName !== providerName
+      ) {
+        throw new Error('state mismatch');
+      }
+    } catch {
+      throw new UnauthorizedException('Invalid or expired login session');
+    }
+
     const provider = await this.prisma.oidcProvider.findFirst({
       where: { companyId, name: providerName, active: true },
     });
     if (!provider) throw new NotFoundException('OIDC provider not found');
 
+    const discovery = await this.fetchDiscovery(provider);
+    if (!discovery.token_endpoint) {
+      throw new UnauthorizedException('Identity provider has no token endpoint');
+    }
+
     let tokenResponse: any;
     try {
-      const tokenUrl = provider.discoveryUrl.replace('/.well-known/openid-configuration', '/token');
-      const response = await fetch(tokenUrl, {
+      const response = await fetch(discovery.token_endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -100,11 +215,16 @@ export class OidcFederationService {
           redirect_uri: provider.redirectUri,
           client_id: provider.clientId,
           client_secret: provider.clientSecret,
-          code_verifier: state,
+          code_verifier: codeVerifier,
         }),
+        signal: AbortSignal.timeout(15000),
       });
       tokenResponse = await response.json();
+      if (!response.ok || tokenResponse.error) {
+        throw new Error(tokenResponse.error_description || tokenResponse.error || `HTTP ${response.status}`);
+      }
     } catch (e: any) {
+      if (e instanceof UnauthorizedException) throw e;
       this.logger.warn(`[${requestId}] OIDC token exchange failed: ${e.message}`);
       throw new UnauthorizedException('OIDC token exchange failed');
     }
@@ -113,24 +233,29 @@ export class OidcFederationService {
       throw new UnauthorizedException('No id_token in OIDC response');
     }
 
-    let userInfo: any;
-    try {
-      const userInfoUrl = provider.discoveryUrl.replace('/.well-known/openid-configuration', '/userinfo');
-      const response = await fetch(userInfoUrl, {
-        headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-      });
-      userInfo = await response.json();
-    } catch (e: any) {
-      this.logger.warn(`[${requestId}] OIDC userInfo fetch failed: ${e.message}`);
-      throw new UnauthorizedException('Failed to fetch user info');
+    const idPayload = await this.verifyIdToken(provider, discovery, tokenResponse.id_token);
+    const email: string | undefined = idPayload.email;
+    if (!email) {
+      throw new UnauthorizedException('No email in identity token');
+    }
+    if (idPayload.email_verified === false) {
+      throw new UnauthorizedException('Identity provider email not verified');
     }
 
-    if (!userInfo.email) {
-      throw new UnauthorizedException('No email in OIDC user info');
+    const normalizedEmail = email.toLowerCase();
+
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new NotFoundException('Company not found');
+    if (company.domain) {
+      const emailDomain = normalizedEmail.split('@')[1]?.toLowerCase();
+      if (emailDomain !== company.domain.toLowerCase()) {
+        this.logger.warn(`[${requestId}] OIDC login: domain mismatch email=${email} expected=${company.domain}`);
+        throw new UnauthorizedException('Email domain does not match company domain');
+      }
     }
 
     let user = await this.prisma.user.findFirst({
-      where: { companyId, email: userInfo.email },
+      where: { companyId, email: normalizedEmail },
     });
 
     let isNewUser = false;
@@ -139,18 +264,18 @@ export class OidcFederationService {
       user = await this.prisma.user.create({
         data: {
           companyId,
-          email: userInfo.email,
-          displayName: userInfo.name || userInfo.preferred_username || userInfo.email.split('@')[0],
+          email: normalizedEmail,
+          displayName: idPayload.name || idPayload.preferred_username || normalizedEmail.split('@')[0],
           platformRole: 'EMPLOYEE',
-          ssoSubject: userInfo.sub,
+          ssoSubject: idPayload.sub,
         },
       });
       isNewUser = true;
-      this.logger.log(`[${requestId}] OIDC user created: ${userInfo.email} company=${companyId}`);
+      this.logger.log(`[${requestId}] OIDC user created: ${normalizedEmail} company=${companyId}`);
     } else if (!user.ssoSubject) {
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { ssoSubject: userInfo.sub },
+        data: { ssoSubject: idPayload.sub },
       });
     }
 
@@ -170,7 +295,7 @@ export class OidcFederationService {
       user.id, ip, userAgent,
     );
 
-    this.logger.log(`[${requestId}] OIDC login OK: email=${userInfo.email} company=${companyId} provider=${providerName}`);
+    this.logger.log(`[${requestId}] OIDC login OK: email=${normalizedEmail} company=${companyId} provider=${providerName}`);
 
     return {
       accessToken,
