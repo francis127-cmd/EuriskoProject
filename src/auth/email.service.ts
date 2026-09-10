@@ -42,10 +42,15 @@ export class EmailService {
     return !!this.transporter;
   }
 
-  async sendInvitation(email: string, companyName: string, token: string): Promise<boolean> {
-    if (!this.transporter) return false;
+  async sendInvitation(
+    email: string,
+    companyName: string,
+    token: string,
+  ): Promise<{ sent: boolean; reason: 'disabled' | 'timeout' | 'error' | null }> {
+    if (!this.transporter) return { sent: false, reason: 'disabled' };
     // Never let a slow mail server hang the request: the mobile client
     // aborts at 12s, which surfaces as a confusing "network error".
+    let failedFast = false;
     const send = this.transporter.sendMail({
       from: this.from,
       to: email,
@@ -65,15 +70,16 @@ export class EmailService {
         return true;
       },
       (e) => {
+        failedFast = true;
         this.logger.error(`Failed to send invitation email to ${email}: ${(e as Error).message}`);
         return false;
       },
     );
     const timedOut = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 9000));
     const result = await Promise.race([send, timedOut]);
-    if (!result) {
-      this.logger.warn(`SMTP send to ${email} timed out or failed — admin must share the code manually`);
-    }
-    return result;
+    if (result) return { sent: true, reason: null };
+    const reason = failedFast ? 'error' : 'timeout';
+    this.logger.warn(`SMTP send to ${email} ${reason === 'timeout' ? 'timed out' : 'failed'} — admin must share the code manually`);
+    return { sent: false, reason };
   }
 }

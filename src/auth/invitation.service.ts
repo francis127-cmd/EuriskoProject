@@ -53,14 +53,15 @@ export class InvitationService {
 
     this.logger.log(`Invitation created for ${email} to ${invitation.company.name}`);
 
-    const emailSent = await this.emailService.sendInvitation(email, invitation.company.name, token);
+    const emailResult = await this.emailService.sendInvitation(email, invitation.company.name, token);
 
     return {
       id: invitation.id,
       email: invitation.email,
       token: invitation.token,
       expiresAt: invitation.expiresAt.toISOString(),
-      emailSent,
+      emailSent: emailResult.sent,
+      emailReason: emailResult.reason,
     };
   }
 }
