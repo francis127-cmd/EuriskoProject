@@ -161,55 +161,6 @@ export class AuthService {
     return this.issueTokenPair(user, ip, userAgent);
   }
 
-  async registerPassword(dto: {
-    email: string;
-    password: string;
-    displayName?: string;
-    companyName?: string;
-    companySlug?: string;
-  }, ip?: string, userAgent?: string) {
-    const requestId = TenantContext.getStore()?.requestId || 'N/A';
-
-    const existing = await this.prisma.user.findFirst({ where: { email: dto.email } });
-    if (existing) {
-      throw new ConflictException('Email already registered');
-    }
-
-    let companyId: string;
-    let newCompany = false;
-
-    if (dto.companySlug) {
-      const company = await this.prisma.company.findUnique({ where: { slug: dto.companySlug } });
-      if (!company) throw new BadRequestException('Company not found');
-      companyId = company.id;
-    } else if (dto.companyName) {
-      const slug = dto.companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      const existingCompany = await this.prisma.company.findUnique({ where: { slug } });
-      if (existingCompany) throw new ConflictException('Company slug already taken');
-      const company = await this.prisma.company.create({
-        data: { name: dto.companyName, slug, authMode: 'PASSWORD' },
-      });
-      companyId = company.id;
-      newCompany = true;
-    } else {
-      throw new BadRequestException('Either companyName or companySlug is required');
-    }
-
-    const passwordHash = await bcrypt.hash(dto.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        companyId,
-        email: dto.email,
-        displayName: dto.displayName || dto.email.split('@')[0],
-        passwordHash,
-        platformRole: 'SYSTEM_ADMIN',
-      },
-    });
-
-    this.logger.log(`[${requestId}] Registration: email=${dto.email} company=${companyId} newCompany=${newCompany}`);
-    return this.issueTokenPair(user, ip, userAgent, newCompany);
-  }
-
   async loginGoogle(idToken: string, ip?: string, userAgent?: string) {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
 

@@ -27,27 +27,6 @@ class LoginDto {
   companySlug?: string;
 }
 
-class RegisterDto {
-  @IsEmail()
-  email: string;
-
-  @IsString()
-  @MinLength(6)
-  password: string;
-
-  @IsOptional()
-  @IsString()
-  displayName?: string;
-
-  @IsOptional()
-  @IsString()
-  companyName?: string;
-
-  @IsOptional()
-  @IsString()
-  companySlug?: string;
-}
-
 class GoogleLoginDto {
   @IsString()
   @IsNotEmpty()
@@ -121,15 +100,6 @@ export class AuthController {
     const ip = req.ip || req.headers['x-forwarded-for'];
     const userAgent = req.headers['user-agent'];
     return this.authService.loginPassword(dto.email, dto.password, dto.companySlug, ip, userAgent);
-  }
-
-  @Public()
-  @Post('register')
-  @Throttle({ default: { limit: 5, ttl: 300000 } })
-  async register(@Body() dto: RegisterDto, @Req() req: any) {
-    const ip = req.ip || req.headers['x-forwarded-for'];
-    const userAgent = req.headers['user-agent'];
-    return this.authService.registerPassword(dto, ip, userAgent);
   }
 
   @Public()
