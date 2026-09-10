@@ -108,6 +108,15 @@ export class RefreshTokenService {
       throw new UnauthorizedException('Refresh token has expired');
     }
 
+    if (!stored.user.active) {
+      this.logger.warn(`Refresh token used for deactivated user ${stored.userId}, revoking family ${payload.family}`);
+      await this.prisma.refreshToken.updateMany({
+        where: { family: payload.family },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Account deactivated');
+    }
+
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revokedAt: new Date() },

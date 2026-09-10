@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Delete, Param, Body, HttpCode, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { AdminGuard } from './admin.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -41,6 +41,12 @@ export class AdminController {
   @Delete('users/:userId')
   async deactivateUser(@Param('userId') userId: string, @CurrentUser() user: AuthUser) {
     return this.adminService.deactivateUser(userId, user);
+  }
+
+  @Post('users/:userId/reactivate')
+  @HttpCode(200)
+  async reactivateUser(@Param('userId') userId: string, @CurrentUser() user: AuthUser) {
+    return this.adminService.reactivateUser(userId, user);
   }
 
   @Get('departments')

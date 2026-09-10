@@ -23,12 +23,14 @@ export class InvitationService {
     if (data.departmentRole && !['AGENT', 'MANAGER'].includes(data.departmentRole)) {
       throw new BadRequestException('Invalid department role');
     }
-    const existing = await this.prisma.user.findFirst({ where: { companyId: data.companyId, email }, select: { id: true } });
-    if (existing) throw new ConflictException('A user with this email already exists in the company');
+    const existing = await this.prisma.user.findFirst({ where: { companyId: data.companyId, email }, select: { id: true, active: true } });
+    if (existing?.active) throw new ConflictException('A user with this email already exists in the company');
     if (data.departmentCode) {
       const department = await this.prisma.department.findFirst({ where: { companyId: data.companyId, code: data.departmentCode }, select: { id: true } });
       if (!department) throw new BadRequestException('Selected department was not found');
     }
+    // Replace any stale invitation for this email so a deactivated user can be re-invited.
+    await this.prisma.invitation.deleteMany({ where: { companyId: data.companyId, email } });
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 

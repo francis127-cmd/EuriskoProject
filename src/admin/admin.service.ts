@@ -30,8 +30,14 @@ export class AdminService {
     if (!user || user.companyId !== admin.companyId) {
       throw new NotFoundException('User not found');
     }
+    if (!user.active) {
+      throw new BadRequestException('User is deactivated. Reactivate them before changing roles or departments.');
+    }
 
     if (dto.platformRole) {
+      if (!['EMPLOYEE', 'SYSTEM_ADMIN'].includes(dto.platformRole)) {
+        throw new BadRequestException('Invalid platform role');
+      }
       await this.prisma.user.update({
         where: { id: userId },
         data: { platformRole: dto.platformRole as PlatformRole },
@@ -39,6 +45,9 @@ export class AdminService {
     }
 
     if (dto.departmentCode) {
+      if (dto.departmentRole && !['AGENT', 'MANAGER'].includes(dto.departmentRole)) {
+        throw new BadRequestException('Invalid department role');
+      }
       const dept = await this.prisma.department.findUnique({
         where: { companyId_code: { companyId: admin.companyId, code: dto.departmentCode } },
       });
@@ -73,6 +82,23 @@ export class AdminService {
     });
 
     return { message: 'User deactivated' };
+  }
+
+  async reactivateUser(userId: string, admin: AuthUser) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.companyId !== admin.companyId) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.active) {
+      throw new BadRequestException('User is already active');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { active: true },
+    });
+
+    return { message: 'User reactivated' };
   }
 
   async listDepartments(admin: AuthUser) {

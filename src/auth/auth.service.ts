@@ -237,9 +237,40 @@ export class AuthService {
     const existing = await this.prisma.user.findFirst({
       where: { companyId: invitation.companyId, email: invitation.email.toLowerCase() },
     });
-    if (existing) throw new ConflictException('Email already registered');
+    if (existing?.active) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(password, 12);
+
+    if (existing) {
+      // Re-invited deactivated user: reactivate with the invitation's role.
+      const user = await this.prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          active: true,
+          passwordHash,
+          platformRole: invitation.platformRole,
+        },
+      });
+
+      if (invitation.departmentCode && invitation.departmentRole) {
+        const dept = await this.prisma.department.findFirst({
+          where: { companyId: invitation.companyId, code: invitation.departmentCode },
+        });
+        if (dept) {
+          await this.prisma.departmentMember.upsert({
+            where: { departmentId_userId: { departmentId: dept.id, userId: user.id } },
+            update: { departmentRole: invitation.departmentRole, active: true },
+            create: { departmentId: dept.id, userId: user.id, departmentRole: invitation.departmentRole },
+          });
+        }
+      }
+
+      await this.prisma.invitation.delete({ where: { id: invitation.id } });
+
+      this.logger.log(`[${requestId}] Invite accepted (reactivated): email=${invitation.email} company=${invitation.companyId}`);
+      return this.issueTokenPair(user, ip, userAgent);
+    }
+
     const user = await this.prisma.user.create({
       data: {
         companyId: invitation.companyId,
