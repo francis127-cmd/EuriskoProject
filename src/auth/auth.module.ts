@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { InvitationService } from './invitation.service';
 import { InvitationController } from './invitation.controller';
+import { EmailService } from './email.service';
 import { RefreshTokenService } from './refresh-token.service';
 import { MfaService } from './mfa.service';
 import { OidcFederationService } from './oidc-federation.service';
@@ -26,6 +27,7 @@ import { AdminPrismaService } from '../admin-prisma.service';
   providers: [
     AuthService,
     InvitationService,
+    EmailService,
     RefreshTokenService,
     MfaService,
     OidcFederationService,

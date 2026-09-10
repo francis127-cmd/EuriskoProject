@@ -33,8 +33,8 @@ export class RequestsService {
     let departmentId: string | undefined;
 
     if (departmentCode && departmentCode !== '_all') {
-      const dept = await this.prisma.department.findFirst({
-        where: { code: departmentCode },
+      const dept = await this.prisma.department.findUnique({
+        where: { companyId_code: { companyId: user.companyId, code: departmentCode } },
       });
       if (!dept) throw new NotFoundException(`Department ${departmentCode} not found`);
 

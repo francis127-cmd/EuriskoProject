@@ -227,7 +227,7 @@ export class AuthService {
     return this.issueTokenPair(user, ip, userAgent);
   }
 
-  async acceptInvite(token: string, password: string, ip?: string, userAgent?: string) {
+  async acceptInvite(token: string, password: string, displayName?: string, ip?: string, userAgent?: string) {
     const requestId = TenantContext.getStore()?.requestId || 'N/A';
 
     const invitation = await this.prisma.invitation.findFirst({ where: { token } });
@@ -249,6 +249,7 @@ export class AuthService {
           active: true,
           passwordHash,
           platformRole: invitation.platformRole,
+          ...(displayName?.trim() ? { displayName: displayName.trim() } : {}),
         },
       });
 
@@ -275,7 +276,7 @@ export class AuthService {
       data: {
         companyId: invitation.companyId,
         email: invitation.email,
-        displayName: invitation.email.split('@')[0],
+        displayName: displayName?.trim() || invitation.email.split('@')[0],
         passwordHash,
         platformRole: invitation.platformRole,
       },

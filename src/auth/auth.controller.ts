@@ -41,6 +41,10 @@ class AcceptInviteDto {
   @IsString()
   @MinLength(6)
   password: string;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
 }
 
 class RefreshTokenDto {
@@ -119,7 +123,7 @@ export class AuthController {
   async acceptInvite(@Body() dto: AcceptInviteDto, @Req() req: any) {
     const ip = req.ip || req.headers['x-forwarded-for'];
     const userAgent = req.headers['user-agent'];
-    return this.authService.acceptInvite(dto.token, dto.password, ip, userAgent);
+    return this.authService.acceptInvite(dto.token, dto.password, dto.displayName, ip, userAgent);
   }
 
   @Public()

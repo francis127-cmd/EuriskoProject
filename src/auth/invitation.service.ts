@@ -1,12 +1,16 @@
 import { Injectable, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { AdminPrismaService } from '../admin-prisma.service';
+import { EmailService } from './email.service';
 import { randomBytes } from 'crypto';
 
 @Injectable()
 export class InvitationService {
   private readonly logger = new Logger(InvitationService.name);
 
-  constructor(private readonly prisma: AdminPrismaService) {}
+  constructor(
+    private readonly prisma: AdminPrismaService,
+    private readonly emailService: EmailService,
+  ) {}
 
   async create(data: {
     companyId: string;
@@ -49,11 +53,14 @@ export class InvitationService {
 
     this.logger.log(`Invitation created for ${email} to ${invitation.company.name}`);
 
+    const emailSent = await this.emailService.sendInvitation(email, invitation.company.name, token);
+
     return {
       id: invitation.id,
       email: invitation.email,
       token: invitation.token,
       expiresAt: invitation.expiresAt.toISOString(),
+      emailSent,
     };
   }
 }
