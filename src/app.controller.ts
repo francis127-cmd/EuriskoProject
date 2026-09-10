@@ -1,11 +1,15 @@
 import { Controller, Get } from '@nestjs/common';
 import { Public } from './auth/public.decorator';
 import { AdminPrismaService } from './admin-prisma.service';
+import { EmailService } from './auth/email.service';
 
 @Public()
 @Controller()
 export class AppController {
-  constructor(private readonly adminPrisma: AdminPrismaService) {}
+  constructor(
+    private readonly adminPrisma: AdminPrismaService,
+    private readonly email: EmailService,
+  ) {}
 
   @Get('health')
   async health() {
@@ -27,6 +31,9 @@ export class AppController {
       timestamp: new Date().toISOString(),
       latencyMs,
       checks,
+      // Informational only: which invite-email provider the running
+      // instance sees ('brevo' | 'smtp' | 'disabled'). Never a secret.
+      email: this.email.status(),
     };
   }
 

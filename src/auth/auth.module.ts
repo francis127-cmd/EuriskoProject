@@ -35,6 +35,6 @@ import { AdminPrismaService } from '../admin-prisma.service';
     { provide: APP_GUARD, useClass: JwtGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [AuthService, JwtModule, AdminPrismaService, RefreshTokenService, MfaService, OidcFederationService],
+  exports: [AuthService, JwtModule, AdminPrismaService, RefreshTokenService, MfaService, OidcFederationService, EmailService],
 })
 export class AuthModule {}

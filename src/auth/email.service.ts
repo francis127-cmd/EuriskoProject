@@ -51,6 +51,13 @@ export class EmailService {
     return !!this.transporter || !!this.brevoKey;
   }
 
+  /** Provider name for health checks. Never exposes secrets. */
+  status(): 'brevo' | 'smtp' | 'disabled' {
+    if (this.brevoKey) return 'brevo';
+    if (this.transporter) return 'smtp';
+    return 'disabled';
+  }
+
   private async sendViaBrevo(email: string, companyName: string, token: string): Promise<boolean> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 9000);
