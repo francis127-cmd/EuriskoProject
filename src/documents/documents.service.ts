@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ServiceUnavailableException,
+  Logger,
 } from '@nestjs/common';
 import { ScopedPrismaService } from '../scoped-prisma.service';
 import { S3Service } from './s3.service';
@@ -22,11 +24,31 @@ const MAGIC_BYTES: Record<string, Buffer[]> = {
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     private readonly prisma: ScopedPrismaService,
     private readonly s3: S3Service,
     private readonly departments: DepartmentsService,
   ) {}
+
+  /**
+   * S3/MinIO is used only when explicitly configured. Render has no object
+   * storage attached, so uploads fall back to Postgres bytea (files are
+   * capped at 5MB). This avoids a hard 500 when MINIO_* is unset.
+   */
+  private get useS3(): boolean {
+    return !!process.env['MINIO_ENDPOINT'];
+  }
+
+  private async s3Upload(key: string, buffer: Buffer, contentType: string): Promise<void> {
+    try {
+      await this.s3.upload(key, buffer, contentType);
+    } catch (e) {
+      this.logger.error(`Document storage upload failed: ${(e as Error).message}`);
+      throw new ServiceUnavailableException('Document storage is temporarily unavailable. Please try again.');
+    }
+  }
 
   private ext(name: string): string {
     const i = name.lastIndexOf('.');
@@ -73,9 +95,13 @@ export class DocumentsService {
     }
 
     const checksum = createHash('sha256').update(file.buffer).digest('hex');
-    const storageKey = `documents/${requestId}-${Date.now()}${ext}`;
+    const storageKey = this.useS3
+      ? `documents/${requestId}-${Date.now()}${ext}`
+      : `db/${requestId}-${Date.now()}${ext}`;
 
-    await this.s3.upload(storageKey, file.buffer, file.mimetype || 'application/octet-stream');
+    if (this.useS3) {
+      await this.s3Upload(storageKey, file.buffer, file.mimetype || 'application/octet-stream');
+    }
 
     await this.prisma.document.updateMany({
       where: { requestId, deletedAt: null },
@@ -91,6 +117,7 @@ export class DocumentsService {
           mimeType: file.mimetype || 'application/octet-stream',
           byteSize: file.buffer.byteLength,
           checksum,
+          data: this.useS3 ? undefined : file.buffer,
           uploadedBy: user.sub,
           purgeAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
@@ -132,7 +159,24 @@ export class DocumentsService {
     const doc = await this.prisma.document.findFirst({ where: { requestId, deletedAt: null } });
     if (!doc) throw new NotFoundException('No document attached');
 
-    const { body, contentType } = await this.s3.download(doc.storageKey);
+    if (doc.data) {
+      return {
+        filename: doc.originalFilename,
+        content: Buffer.from(doc.data),
+        contentType: doc.mimeType,
+        byteSize: doc.byteSize,
+        checksum: doc.checksum,
+      };
+    }
+
+    let downloaded: { body: Buffer; contentType: string };
+    try {
+      downloaded = await this.s3.download(doc.storageKey);
+    } catch (e) {
+      this.logger.error(`Document storage download failed: ${(e as Error).message}`);
+      throw new ServiceUnavailableException('Document storage is temporarily unavailable. Please try again.');
+    }
+    const { body, contentType } = downloaded;
     return {
       filename: doc.originalFilename,
       content: body,
@@ -157,7 +201,13 @@ export class DocumentsService {
     const doc = await this.prisma.document.findFirst({ where: { requestId, deletedAt: null } });
     if (!doc) throw new NotFoundException('No document attached');
 
-    await this.s3.delete(doc.storageKey);
+    if (!doc.data) {
+      try {
+        await this.s3.delete(doc.storageKey);
+      } catch (e) {
+        this.logger.warn(`Document storage delete failed (continuing with soft-delete): ${(e as Error).message}`);
+      }
+    }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.document.update({

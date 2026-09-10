@@ -28,6 +28,9 @@ export class EmailService {
         port,
         secure: port === 465,
         auth: { user, pass },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
       });
       this.logger.log(`SMTP email enabled via ${host}:${port}`);
     } else {
@@ -41,26 +44,36 @@ export class EmailService {
 
   async sendInvitation(email: string, companyName: string, token: string): Promise<boolean> {
     if (!this.transporter) return false;
-    try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to: email,
-        subject: `You've been invited to join ${companyName}`,
-        text:
-          `You've been invited to join ${companyName} on Internal Operations Hub.\n\n` +
-          `Open the app, tap "Have an invitation code?" on the login screen, and enter this code:\n\n${token}\n\n` +
-          `You will set your own password on that screen. This code expires in 7 days.`,
-        html:
-          `<p>You've been invited to join <strong>${companyName}</strong> on Internal Operations Hub.</p>` +
-          `<p>Open the app, tap <strong>“Have an invitation code?”</strong> on the login screen, and enter this code:</p>` +
-          `<p style="font-size:18px;font-weight:bold;letter-spacing:1px;">${token}</p>` +
-          `<p>You will set your own password on that screen. This code expires in 7 days.</p>`,
-      });
-      this.logger.log(`Invitation email sent to ${email}`);
-      return true;
-    } catch (e) {
-      this.logger.error(`Failed to send invitation email to ${email}: ${(e as Error).message}`);
-      return false;
+    // Never let a slow mail server hang the request: the mobile client
+    // aborts at 12s, which surfaces as a confusing "network error".
+    const send = this.transporter.sendMail({
+      from: this.from,
+      to: email,
+      subject: `You've been invited to join ${companyName}`,
+      text:
+        `You've been invited to join ${companyName} on Internal Operations Hub.\n\n` +
+        `Open the app, tap "Have an invitation code?" on the login screen, and enter this code:\n\n${token}\n\n` +
+        `You will set your own password on that screen. This code expires in 7 days.`,
+      html:
+        `<p>You've been invited to join <strong>${companyName}</strong> on Internal Operations Hub.</p>` +
+        `<p>Open the app, tap <strong>“Have an invitation code?”</strong> on the login screen, and enter this code:</p>` +
+        `<p style="font-size:18px;font-weight:bold;letter-spacing:1px;">${token}</p>` +
+        `<p>You will set your own password on that screen. This code expires in 7 days.</p>`,
+    }).then(
+      () => {
+        this.logger.log(`Invitation email sent to ${email}`);
+        return true;
+      },
+      (e) => {
+        this.logger.error(`Failed to send invitation email to ${email}: ${(e as Error).message}`);
+        return false;
+      },
+    );
+    const timedOut = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 9000));
+    const result = await Promise.race([send, timedOut]);
+    if (!result) {
+      this.logger.warn(`SMTP send to ${email} timed out or failed — admin must share the code manually`);
     }
+    return result;
   }
 }

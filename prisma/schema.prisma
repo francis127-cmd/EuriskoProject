@@ -180,6 +180,7 @@ model Document {
   mimeType         String
   byteSize         Int
   checksum         String
+  data             Bytes?
   uploadedBy       String
   purgeAt          DateTime
   deletedAt        DateTime?
