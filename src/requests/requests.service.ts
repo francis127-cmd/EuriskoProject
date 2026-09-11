@@ -3,11 +3,7 @@ import { ScopedPrismaService } from '../scoped-prisma.service';
 import { DepartmentsService } from '../departments/departments.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthUser } from '../auth/auth.service';
-
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  PENDING: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
-  IN_PROGRESS: ['COMPLETED', 'REJECTED'],
-};
+import { VALID_TRANSITIONS } from './request-transitions';
 
 // Postgres native enums sort by declaration order (LOW, STANDARD, URGENT),
 // so URGENT-first queue ordering (acceptance criterion 10) requires DESC.

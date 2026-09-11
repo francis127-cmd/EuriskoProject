@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, ConflictException, NotFoundException, 
 import { AdminPrismaService } from '../admin-prisma.service';
 import * as bcrypt from 'bcrypt';
 import { Priority, PlatformRole } from '@prisma/client';
+import { normalizeSlug } from './company-slug';
 
 export const DEFAULT_DEPARTMENTS = [
   {
@@ -81,7 +82,7 @@ export class CompaniesService {
     adminPassword?: string;
     adminName?: string;
   }) {
-    const slug = data.slug.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = normalizeSlug(data.slug);
     const adminEmail = data.adminEmail.toLowerCase().trim();
 
     if (!slug) throw new BadRequestException('Invalid company slug');
