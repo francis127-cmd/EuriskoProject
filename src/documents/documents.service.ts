@@ -5,6 +5,7 @@ import {
   ServiceUnavailableException,
   ForbiddenException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ScopedPrismaService } from '../scoped-prisma.service';
 import { S3Service } from './s3.service';
@@ -25,7 +26,7 @@ const MAGIC_BYTES: Record<string, Buffer[]> = {
 };
 
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnModuleInit {
   private readonly logger = new Logger(DocumentsService.name);
 
   constructor(
@@ -42,6 +43,35 @@ export class DocumentsService {
    */
   private get useS3(): boolean {
     return !!process.env['MINIO_ENDPOINT'];
+  }
+
+  async onModuleInit(): Promise<void> {
+    // One-way migration: once object storage is configured (e.g. R2 keys
+    // added later), move Postgres-held payloads to the bucket in the
+    // background and clear the bytea column. Never blocks boot.
+    if (!this.useS3) return;
+    void this.backfillDbDocumentsToS3().catch((e) =>
+      this.logger.error(`Document backfill failed: ${(e as Error).message}`),
+    );
+  }
+
+  private async backfillDbDocumentsToS3(): Promise<void> {
+    const docs = await this.prisma.document.findMany({
+      where: { NOT: { data: null }, deletedAt: null },
+      select: { id: true, storageKey: true, mimeType: true, data: true },
+    });
+    if (docs.length === 0) return;
+    let moved = 0;
+    for (const doc of docs) {
+      try {
+        await this.s3.upload(doc.storageKey, Buffer.from(doc.data as Buffer), doc.mimeType);
+        await this.prisma.document.update({ where: { id: doc.id }, data: { data: null } });
+        moved++;
+      } catch (e) {
+        this.logger.warn(`Backfill skipped for ${doc.id}: ${(e as Error).message}`);
+      }
+    }
+    this.logger.log(`Document backfill complete: ${moved}/${docs.length} moved to object storage`);
   }
 
   private async s3Upload(key: string, buffer: Buffer, contentType: string): Promise<void> {
@@ -167,6 +197,7 @@ export class DocumentsService {
         payload: { documentId: created.id, filename: file.originalname, actorId: user.sub },
         idempotencyKey: `doc-${created.id}-uploaded`,
       });
+      await this.notifications.fanout(tx, { requestId, eventType: 'document.uploaded', actorId: user.sub });
       return created;
     });
 
@@ -266,6 +297,7 @@ export class DocumentsService {
         payload: { documentId: doc.id, actorId: user.sub },
         idempotencyKey: `doc-${doc.id}-deleted`,
       });
+      await this.notifications.fanout(tx, { requestId, eventType: 'document.deleted', actorId: user.sub });
     });
 
     return { deleted: true };

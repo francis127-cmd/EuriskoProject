@@ -8,9 +8,16 @@ export class S3Service {
   private readonly bucket: string;
 
   constructor() {
+    // Endpoint may be a full URL (e.g. Cloudflare R2:
+    // https://<account-id>.r2.cloudflarestorage.com) or a MinIO host.
+    // MINIO_USE_SSL / MINIO_FORCE_PATH_STYLE only apply to the host form.
+    const endpoint = process.env['MINIO_ENDPOINT'] || 'localhost';
+    const fullUrl = endpoint.startsWith('http://') || endpoint.startsWith('https://');
+    const useSsl = process.env['MINIO_USE_SSL'] === 'true';
     this.client = new S3Client({
-      endpoint: `http://${process.env['MINIO_ENDPOINT'] || 'localhost'}:${process.env['MINIO_PORT'] || '9000'}`,
-      forcePathStyle: true,
+      endpoint: fullUrl ? endpoint : `${useSsl ? 'https' : 'http'}://${endpoint}:${process.env['MINIO_PORT'] || '9000'}`,
+      region: process.env['AWS_REGION'] || 'us-east-1',
+      forcePathStyle: process.env['MINIO_FORCE_PATH_STYLE'] !== 'false',
       credentials: {
         accessKeyId: process.env['MINIO_ACCESS_KEY'] || 'minioadmin',
         secretAccessKey: process.env['MINIO_SECRET_KEY'] || 'minioadmin',

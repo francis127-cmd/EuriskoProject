@@ -37,9 +37,106 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * In-app inbox fan-out (product-spec section 6: notify the employee on
+   * creation, claim, rejection, completion and cancellation; notify
+   * department staff on new requests). Accepts any client with the same
+   * query surface (transaction or service client). Never throws — inbox
+   * delivery must not break the request mutation it accompanies.
+   */
+  async fanout(
+    db: any,
+    input: { requestId: string; eventType: string; actorId: string },
+  ): Promise<void> {
+    try {
+      const req = await db.request.findUnique({
+        where: { id: input.requestId },
+        select: {
+          id: true, title: true, companyId: true, employeeId: true, departmentId: true,
+          department: { select: { name: true } },
+        },
+      });
+      if (!req) return;
+      const members: { userId: string }[] = await db.departmentMember.findMany({
+        where: { departmentId: req.departmentId, active: true },
+        select: { userId: true },
+      });
+      const staffIds = members.map((m) => m.userId).filter((id) => id !== input.actorId);
+      const short = req.title.length > 60 ? `${req.title.slice(0, 57)}...` : req.title;
+      const rows: { userId: string; type: string; title: string; body: string }[] = [];
+      const toEmployee = (title: string, body: string) => {
+        if (req.employeeId !== input.actorId) {
+          rows.push({ userId: req.employeeId, type: input.eventType, title, body });
+        }
+      };
+      switch (input.eventType) {
+        case 'request.created':
+          for (const id of staffIds) {
+            rows.push({ userId: id, type: input.eventType, title: `New request in ${req.department.name}`, body: short });
+          }
+          break;
+        case 'request.claimed':
+          toEmployee('Your request was claimed', `“${short}” is now being handled.`);
+          break;
+        case 'request.completed':
+          toEmployee('Your request was completed', `“${short}” is resolved — open it to review.`);
+          break;
+        case 'request.rejected':
+          toEmployee('Your request was rejected', `“${short}” was rejected — open it for the reason.`);
+          break;
+        case 'request.cancelled':
+          for (const id of staffIds) {
+            rows.push({ userId: id, type: input.eventType, title: 'A request was cancelled', body: short });
+          }
+          break;
+        case 'document.uploaded':
+          toEmployee('A document was added to your request', `“${short}” has a new attachment.`);
+          break;
+        case 'document.deleted':
+          toEmployee('A document was removed from your request', `An attachment on “${short}” was removed.`);
+          break;
+        default:
+          return;
+      }
+      if (rows.length === 0) return;
+      await db.notification.createMany({
+        data: rows.map((r) => ({ ...r, companyId: req.companyId, requestId: req.id })),
+      });
+    } catch (e) {
+      this.logger.error(`Inbox fan-out failed for ${input.eventType} on ${input.requestId}: ${(e as Error).message}`);
+    }
+  }
+
+  async listForUser(userId: string) {
+    return this.prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
+  async unreadCount(userId: string): Promise<number> {
+    return this.prisma.notification.count({ where: { userId, readAt: null } });
+  }
+
+  async markRead(userId: string, id: string): Promise<boolean> {
+    const res = await this.prisma.notification.updateMany({
+      where: { id, userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return res.count > 0;
+  }
+
+  async markAllRead(userId: string): Promise<number> {
+    const res = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return res.count;
+  }
+
   @Cron(CronExpression.EVERY_MINUTE)
-  async deliverPendingEvents() {
-    const webhook = process.env['NOTIFY_WEBHOOK_URL'];
+  async deliverPendingEvents() {    const webhook = process.env['NOTIFY_WEBHOOK_URL'];
     const pending = await this.prisma.notificationEvent.findMany({
       where: { status: 'PENDING', attempts: { lt: MAX_ATTEMPTS } },
       orderBy: { createdAt: 'asc' },

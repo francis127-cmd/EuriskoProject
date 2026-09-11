@@ -185,6 +185,7 @@ export class RequestsService {
         payload: { departmentId: dept.id, requestTypeId: rt.id, priority: req.priority, title: req.title },
         idempotencyKey: `req-${req.id}-created`,
       });
+      await this.notifications.fanout(tx, { requestId: req.id, eventType: 'request.created', actorId: user.sub });
 
       return req;
     });
@@ -243,6 +244,7 @@ export class RequestsService {
         idempotencyKey: `req-${id}-claimed-${user.sub}`,
       },
     });
+    await this.notifications.fanout(this.prisma, { requestId: id, eventType: 'request.claimed', actorId: user.sub });
 
     return this.prisma.request.findUnique({
       where: { id },
@@ -340,6 +342,7 @@ export class RequestsService {
         payload: { from: request.status, to: dto.status, actorId: user.sub },
         idempotencyKey: `req-${id}-${dto.status}-${request.status}`,
       });
+      await this.notifications.fanout(tx, { requestId: id, eventType: `request.${dto.status.toLowerCase()}`, actorId: user.sub });
 
       return updated;
     });
@@ -380,6 +383,7 @@ export class RequestsService {
         payload: { actorId: user.sub },
         idempotencyKey: `req-${id}-cancelled`,
       });
+      await this.notifications.fanout(tx, { requestId: id, eventType: 'request.cancelled', actorId: user.sub });
 
       return updated;
     });
