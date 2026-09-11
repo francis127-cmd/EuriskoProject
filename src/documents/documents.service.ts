@@ -197,9 +197,10 @@ export class DocumentsService implements OnModuleInit {
         payload: { documentId: created.id, filename: file.originalname, actorId: user.sub },
         idempotencyKey: `doc-${created.id}-uploaded`,
       });
-      await this.notifications.fanout(tx, { requestId, eventType: 'document.uploaded', actorId: user.sub });
       return created;
     });
+
+    await this.notifications.fanout({ requestId, eventType: 'document.uploaded', actorId: user.sub });
 
     return {
       id: doc.id,
@@ -297,8 +298,9 @@ export class DocumentsService implements OnModuleInit {
         payload: { documentId: doc.id, actorId: user.sub },
         idempotencyKey: `doc-${doc.id}-deleted`,
       });
-      await this.notifications.fanout(tx, { requestId, eventType: 'document.deleted', actorId: user.sub });
     });
+
+    await this.notifications.fanout({ requestId, eventType: 'document.deleted', actorId: user.sub });
 
     return { deleted: true };
   }

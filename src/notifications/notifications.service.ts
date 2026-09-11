@@ -40,24 +40,22 @@ export class NotificationsService {
   /**
    * In-app inbox fan-out (product-spec section 6: notify the employee on
    * creation, claim, rejection, completion and cancellation; notify
-   * department staff on new requests). Accepts any client with the same
-   * query surface (transaction or service client). Never throws — inbox
-   * delivery must not break the request mutation it accompanies.
+   * department staff on new requests). Runs POST-COMMIT via the unscoped
+   * admin client: the durable outbox row (written in-txn by emit()) is the
+   * source of truth, the inbox is a best-effort projection. Never throws —
+   * inbox delivery must not break the request mutation it accompanies.
    */
-  async fanout(
-    db: any,
-    input: { requestId: string; eventType: string; actorId: string },
-  ): Promise<void> {
+  async fanout(input: { requestId: string; eventType: string; actorId: string }): Promise<void> {
     try {
-      const req = await db.request.findUnique({
+      const req = await this.prisma.request.findUnique({
         where: { id: input.requestId },
         select: {
-          id: true, title: true, companyId: true, employeeId: true, departmentId: true,
-          department: { select: { name: true } },
+          id: true, title: true, employeeId: true, departmentId: true,
+          department: { select: { id: true, name: true, companyId: true } },
         },
       });
       if (!req) return;
-      const members: { userId: string }[] = await db.departmentMember.findMany({
+      const members = await this.prisma.departmentMember.findMany({
         where: { departmentId: req.departmentId, active: true },
         select: { userId: true },
       });
@@ -99,9 +97,10 @@ export class NotificationsService {
           return;
       }
       if (rows.length === 0) return;
-      await db.notification.createMany({
-        data: rows.map((r) => ({ ...r, companyId: req.companyId, requestId: req.id })),
+      const created = await this.prisma.notification.createMany({
+        data: rows.map((r) => ({ ...r, companyId: req.department.companyId, requestId: req.id })),
       });
+      this.logger.log(`Inbox fan-out: ${created.count} notification(s) for ${input.eventType} on ${input.requestId}`);
     } catch (e) {
       this.logger.error(`Inbox fan-out failed for ${input.eventType} on ${input.requestId}: ${(e as Error).message}`);
     }

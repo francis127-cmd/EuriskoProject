@@ -185,11 +185,10 @@ export class RequestsService {
         payload: { departmentId: dept.id, requestTypeId: rt.id, priority: req.priority, title: req.title },
         idempotencyKey: `req-${req.id}-created`,
       });
-      await this.notifications.fanout(tx, { requestId: req.id, eventType: 'request.created', actorId: user.sub });
-
       return req;
     });
 
+    await this.notifications.fanout({ requestId: request.id, eventType: 'request.created', actorId: user.sub });
     return request;
   }
 
@@ -244,7 +243,7 @@ export class RequestsService {
         idempotencyKey: `req-${id}-claimed-${user.sub}`,
       },
     });
-    await this.notifications.fanout(this.prisma, { requestId: id, eventType: 'request.claimed', actorId: user.sub });
+    await this.notifications.fanout({ requestId: id, eventType: 'request.claimed', actorId: user.sub });
 
     return this.prisma.request.findUnique({
       where: { id },
@@ -294,7 +293,7 @@ export class RequestsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const statusUpdated = await this.prisma.$transaction(async (tx) => {
       const data: any = { status: dto.status };
       if (dto.resolutionNote) data.resolutionNote = dto.resolutionNote;
       if (dto.rejectionReason) data.rejectionReason = dto.rejectionReason;
@@ -342,10 +341,12 @@ export class RequestsService {
         payload: { from: request.status, to: dto.status, actorId: user.sub },
         idempotencyKey: `req-${id}-${dto.status}-${request.status}`,
       });
-      await this.notifications.fanout(tx, { requestId: id, eventType: `request.${dto.status.toLowerCase()}`, actorId: user.sub });
 
       return updated;
     });
+
+    await this.notifications.fanout({ requestId: id, eventType: `request.${dto.status.toLowerCase()}`, actorId: user.sub });
+    return statusUpdated;
   }
 
   async cancelRequest(id: string, user: AuthUser) {
@@ -356,7 +357,7 @@ export class RequestsService {
       throw new BadRequestException('Only PENDING requests can be cancelled');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const cancelled = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.request.update({
         where: { id },
         data: { status: 'CANCELLED', completedAt: new Date() },
@@ -383,9 +384,11 @@ export class RequestsService {
         payload: { actorId: user.sub },
         idempotencyKey: `req-${id}-cancelled`,
       });
-      await this.notifications.fanout(tx, { requestId: id, eventType: 'request.cancelled', actorId: user.sub });
 
       return updated;
     });
+
+    await this.notifications.fanout({ requestId: id, eventType: 'request.cancelled', actorId: user.sub });
+    return cancelled;
   }
 }
