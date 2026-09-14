@@ -26,16 +26,23 @@ export class JwtGuard implements CanActivate {
       throw new UnauthorizedException('Missing token');
     }
     const token = auth.slice(7);
-    const user = await this.authService.verifyToken(token);
+
+    let user;
+    try {
+      user = await this.authService.verifyToken(token);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+
     req.user = user;
 
-    // `run()` ends when the guard callback returns, before the controller is
-    // invoked. `enterWith()` keeps the authenticated tenant in the request's
-    // AsyncLocalStorage chain for every downstream service and Prisma query.
-    TenantContext.enterWith({
-      ...TenantContext.getStore(),
-      companyId: user.companyId,
-    });
+    // Mutate the existing store (created by TenantMiddleware via .run()).
+    // Safe: no enterWith(), no context leak risk.
+    const store = TenantContext.getStore();
+    if (store) {
+      store.companyId = user.companyId;
+    }
+
     return true;
   }
 }

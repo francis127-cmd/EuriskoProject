@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -17,6 +17,7 @@ import { DomainsModule } from './domains/domains.module';
 import { ScimModule } from './scim/scim.module';
 import { LegalModule } from './legal/legal.module';
 import { InfraExceptionFilter } from './common/infra-exception.filter';
+import { TenantMiddleware } from './tenant.middleware';
 import { AppController } from './app.controller';
 
 @Module({
@@ -51,4 +52,8 @@ import { AppController } from './app.controller';
   ],
   exports: [ScopedPrismaService, AdminPrismaService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(TenantMiddleware).forRoutes('*');
+  }
+}
