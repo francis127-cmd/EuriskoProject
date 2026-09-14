@@ -1,5 +1,6 @@
 import { Injectable, UnauthorizedException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
 import { AdminPrismaService } from '../admin-prisma.service';
@@ -31,11 +32,19 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly refreshTokenService: RefreshTokenService,
     private readonly mfaService: MfaService,
+    private readonly configService: ConfigService,
   ) {
-    this.googleClient = new OAuth2Client(process.env['GOOGLE_CLIENT_ID']);
+    const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+    if (!googleClientId) {
+      this.logger.warn('GOOGLE_CLIENT_ID is not set — Google SSO will fail');
+    }
+    this.googleClient = new OAuth2Client(googleClientId);
   }
 
   async discover(email: string) {
+    if (!email || !email.includes('@')) {
+      throw new BadRequestException('A valid email address is required');
+    }
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain) return { authMode: 'REGISTER' };
 
@@ -168,7 +177,7 @@ export class AuthService {
     try {
       const ticket = await this.googleClient.verifyIdToken({
         idToken,
-        audience: process.env['GOOGLE_CLIENT_ID'],
+        audience: this.configService.get<string>('GOOGLE_CLIENT_ID'),
       });
       payload = ticket.getPayload();
     } catch (e) {
@@ -241,61 +250,60 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    if (existing) {
-      // Re-invited deactivated user: reactivate with the invitation's role.
-      const user = await this.prisma.user.update({
-        where: { id: existing.id },
-        data: {
-          active: true,
-          passwordHash,
-          platformRole: invitation.platformRole,
-          ...(displayName?.trim() ? { displayName: displayName.trim() } : {}),
-        },
-      });
+    const user = await this.prisma.$transaction(async (tx) => {
+      let user: { id: string; email: string; displayName: string; platformRole: string; companyId: string };
+
+      if (existing) {
+        // Invalidate old tokens before reactivation so stale permissions don't persist
+        await this.refreshTokenService.revokeAllUserTokens(existing.id);
+
+        user = await tx.user.update({
+          where: { id: existing.id },
+          data: {
+            active: true,
+            passwordHash,
+            platformRole: invitation.platformRole,
+            ...(displayName?.trim() ? { displayName: displayName.trim() } : {}),
+          },
+        });
+      } else {
+        user = await tx.user.create({
+          data: {
+            companyId: invitation.companyId,
+            email: invitation.email,
+            displayName: displayName?.trim() || invitation.email.split('@')[0],
+            passwordHash,
+            platformRole: invitation.platformRole,
+          },
+        });
+      }
 
       if (invitation.departmentCode && invitation.departmentRole) {
-        const dept = await this.prisma.department.findFirst({
+        const dept = await tx.department.findFirst({
           where: { companyId: invitation.companyId, code: invitation.departmentCode },
         });
         if (dept) {
-          await this.prisma.departmentMember.upsert({
-            where: { departmentId_userId: { departmentId: dept.id, userId: user.id } },
-            update: { departmentRole: invitation.departmentRole, active: true },
-            create: { departmentId: dept.id, userId: user.id, departmentRole: invitation.departmentRole },
-          });
+          if (existing) {
+            await tx.departmentMember.upsert({
+              where: { departmentId_userId: { departmentId: dept.id, userId: user.id } },
+              update: { departmentRole: invitation.departmentRole, active: true },
+              create: { departmentId: dept.id, userId: user.id, departmentRole: invitation.departmentRole },
+            });
+          } else {
+            await tx.departmentMember.create({
+              data: { departmentId: dept.id, userId: user.id, departmentRole: invitation.departmentRole },
+            });
+          }
         }
       }
 
-      await this.prisma.invitation.delete({ where: { id: invitation.id } });
+      await tx.invitation.delete({ where: { id: invitation.id } });
 
-      this.logger.log(`[${requestId}] Invite accepted (reactivated): email=${invitation.email} company=${invitation.companyId}`);
-      return this.issueTokenPair(user, ip, userAgent);
-    }
-
-    const user = await this.prisma.user.create({
-      data: {
-        companyId: invitation.companyId,
-        email: invitation.email,
-        displayName: displayName?.trim() || invitation.email.split('@')[0],
-        passwordHash,
-        platformRole: invitation.platformRole,
-      },
+      return user;
     });
 
-    if (invitation.departmentCode) {
-      const dept = await this.prisma.department.findFirst({
-        where: { companyId: invitation.companyId, code: invitation.departmentCode },
-      });
-      if (dept && invitation.departmentRole) {
-        await this.prisma.departmentMember.create({
-          data: { departmentId: dept.id, userId: user.id, departmentRole: invitation.departmentRole },
-        });
-      }
-    }
-
-    await this.prisma.invitation.delete({ where: { id: invitation.id } });
-
-    this.logger.log(`[${requestId}] Invite accepted: email=${invitation.email} company=${invitation.companyId}`);
+    const action = existing ? 'reactivated' : 'new';
+    this.logger.log(`[${requestId}] Invite accepted (${action}): email=${invitation.email} company=${invitation.companyId}`);
     return this.issueTokenPair(user, ip, userAgent);
   }
 
