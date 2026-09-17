@@ -18,7 +18,9 @@ import { AdminPrismaService } from '../admin-prisma.service';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    // Global: ScimModule re-provides AuthService in its own scope, so
+    // ConfigService must be resolvable outside AuthModule too.
+    ConfigModule.forRoot({ isGlobal: true }),
     JwtModule.register({
       global: true,
       secret: process.env['JWT_SECRET'],
