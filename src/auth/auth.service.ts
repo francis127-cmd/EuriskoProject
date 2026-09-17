@@ -240,26 +240,45 @@ export class AuthService {
       throw new UnauthorizedException('No company is configured for this Google account');
     }
 
-    const user = await this.prisma.user.findFirst({
-      where: { companyId: company.id, email: payload.email.toLowerCase() },
-    });
-
-    if (!user) {
-      this.logger.warn(`[${requestId}] Google login: unknown user ${payload.email}`);
-      throw new UnauthorizedException('No account found. Please register first.');
-    }
-
-    if (!user.active) {
-      this.logger.warn(`[${requestId}] Google login: deactivated user ${payload.email}`);
-      throw new UnauthorizedException('Account deactivated');
-    }
-
+    // Company gates first: only verified SSO companies with a matching
+    // domain may auto-provision users (same model as OIDC login).
     if (company.authMode !== 'SSO') {
       throw new UnauthorizedException('Google sign-in is not enabled for this company');
     }
     if (company.domain && emailDomain !== company.domain.toLowerCase()) {
       this.logger.warn(`[${requestId}] Google login: domain mismatch email=${payload.email} expected=${company.domain}`);
       throw new UnauthorizedException('Email domain does not match company domain');
+    }
+
+    const normalizedEmail = payload.email.toLowerCase();
+    let user = await this.prisma.user.findFirst({
+      where: { companyId: company.id, email: normalizedEmail },
+    });
+
+    if (!user) {
+      // JIT provisioning: first-time Google user with a verified,
+      // domain-matching email joins as EMPLOYEE (no password, Google-only).
+      // Role elevation (agent/admin) stays an explicit admin action.
+      user = await this.prisma.user.create({
+        data: {
+          companyId: company.id,
+          email: normalizedEmail,
+          displayName: payload.name || normalizedEmail.split('@')[0],
+          platformRole: 'EMPLOYEE',
+          ssoSubject: payload.sub,
+        },
+      });
+      this.logger.log(`[${requestId}] Google user auto-provisioned: ${normalizedEmail} company=${company.slug}`);
+    } else if (!user.ssoSubject) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { ssoSubject: payload.sub },
+      });
+    }
+
+    if (!user.active) {
+      this.logger.warn(`[${requestId}] Google login: deactivated user ${payload.email}`);
+      throw new UnauthorizedException('Account deactivated');
     }
 
     this.logger.log(`[${requestId}] Google login OK: email=${payload.email} company=${company?.slug}`);
