@@ -213,7 +213,16 @@ export class AuthService {
       throw new UnauthorizedException('Google email not verified');
     }
 
-    if (payload.iss !== 'accounts.google.com' && payload.iss !== 'securetoken.google.com') {
+    // Real Google ID tokens carry iss "https://accounts.google.com" (with
+    // scheme). verifyIdToken already validated the issuer; this is a
+    // defense-in-depth check that must accept both forms.
+    const allowedIssuers = new Set([
+      'accounts.google.com',
+      'https://accounts.google.com',
+      'securetoken.google.com',
+      'https://securetoken.google.com',
+    ]);
+    if (!payload.iss || !allowedIssuers.has(payload.iss)) {
       this.logger.warn(`[${requestId}] Google login: invalid issuer ${payload.iss}`);
       throw new UnauthorizedException('Invalid Google token issuer');
     }
