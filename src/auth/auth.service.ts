@@ -231,31 +231,60 @@ export class AuthService {
       throw new UnauthorizedException('No email in Google token');
     }
 
-    const emailDomain = payload.email.split('@')[1]?.toLowerCase();
-    const companyDomain = payload.hd?.toLowerCase() || emailDomain;
-    const company = companyDomain
-      ? await this.prisma.company.findFirst({ where: { domain: companyDomain } })
-      : null;
-    if (!company) {
-      throw new UnauthorizedException('No company is configured for this Google account');
+    const normalizedEmail = payload.email.toLowerCase();
+    const emailDomain = normalizedEmail.split('@')[1]?.toLowerCase();
+    const tokenDomain = payload.hd?.toLowerCase() || emailDomain;
+
+    // Existing users: route by established membership, not by token domain.
+    // (A token domain can map to a different company — e.g. a Gmail admin of
+    // a Workspace-domain company — while discover already resolved the right
+    // one. The membership itself was verified at invite/registration/JIT time,
+    // and the token proves ownership of the exact email address.)
+    const existingUsers = await this.prisma.user.findMany({
+      where: { email: normalizedEmail },
+      include: { company: true },
+    });
+
+    let company: NonNullable<(typeof existingUsers)[number]['company']> | null = null;
+    let user: (typeof existingUsers)[number] | null = null;
+
+    if (existingUsers.length === 1) {
+      const found = existingUsers[0];
+      if (!found) throw new UnauthorizedException('Invalid Google token');
+      user = found;
+      company = found.company;
+    } else if (existingUsers.length > 1) {
+      // Same email in several companies: disambiguate via the token domain.
+      const match =
+        existingUsers.find((u) => u.company.domain?.toLowerCase() === tokenDomain) || null;
+      if (!match) {
+        this.logger.warn(`[${requestId}] Google login: email ${payload.email} exists in multiple companies, none matching ${tokenDomain}`);
+        throw new UnauthorizedException('This email belongs to multiple workspaces. Please sign in with email and password.');
+      }
+      user = match;
+      company = match.company;
+    } else {
+      const routed = tokenDomain
+        ? await this.prisma.company.findFirst({ where: { domain: tokenDomain } })
+        : null;
+      if (!routed) {
+        throw new UnauthorizedException('No company is configured for this Google account');
+      }
+      company = routed;
     }
 
-    // Company gates first: only verified SSO companies with a matching
-    // domain may auto-provision users (same model as OIDC login).
+    // Company gates: Google login only for SSO companies. The domain-match
+    // gate applies to JIT provisioning; pre-existing members are already bound
+    // to their company by invite/registration.
     if (company.authMode !== 'SSO') {
       throw new UnauthorizedException('Google sign-in is not enabled for this company');
     }
-    if (company.domain && emailDomain !== company.domain.toLowerCase()) {
-      this.logger.warn(`[${requestId}] Google login: domain mismatch email=${payload.email} expected=${company.domain}`);
-      throw new UnauthorizedException('Email domain does not match company domain');
-    }
-
-    const normalizedEmail = payload.email.toLowerCase();
-    let user = await this.prisma.user.findFirst({
-      where: { companyId: company.id, email: normalizedEmail },
-    });
 
     if (!user) {
+      if (company.domain && emailDomain !== company.domain.toLowerCase()) {
+        this.logger.warn(`[${requestId}] Google login: domain mismatch email=${payload.email} expected=${company.domain}`);
+        throw new UnauthorizedException('Email domain does not match company domain');
+      }
       // JIT provisioning: first-time Google user with a verified,
       // domain-matching email joins as EMPLOYEE (no password, Google-only).
       // Role elevation (agent/admin) stays an explicit admin action.
@@ -267,6 +296,7 @@ export class AuthService {
           platformRole: 'EMPLOYEE',
           ssoSubject: payload.sub,
         },
+        include: { company: true },
       });
       this.logger.log(`[${requestId}] Google user auto-provisioned: ${normalizedEmail} company=${company.slug}`);
     } else if (!user.ssoSubject) {
