@@ -22,10 +22,16 @@ const PUBLIC_EMAIL_PROVIDERS = new Set([
   'live.com', 'msn.com', 'me.com', 'inbox.com', 'gmx.com',
 ]);
 
+// Single global Google Client ID for the entire app — no per-company IDs needed.
+// Prefer the GOOGLE_CLIENT_ID env var (e.g. on Render); fall back to the
+// registered web client so local/dev works without extra configuration.
+const GOOGLE_CLIENT_ID_FALLBACK = '804630899699-d6eceuaat3io3p1f65ihvsejfgpnatcn.apps.googleusercontent.com';
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly googleClient: OAuth2Client;
+  private readonly googleClientId: string;
 
   constructor(
     private readonly prisma: AdminPrismaService,
@@ -34,11 +40,12 @@ export class AuthService {
     private readonly mfaService: MfaService,
     private readonly configService: ConfigService,
   ) {
-    const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
-    if (!googleClientId) {
-      this.logger.warn('GOOGLE_CLIENT_ID is not set — Google SSO will fail');
+    // Use the single global Client ID for token verification
+    this.googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID') || GOOGLE_CLIENT_ID_FALLBACK;
+    if (!this.configService.get<string>('GOOGLE_CLIENT_ID')) {
+      this.logger.warn('GOOGLE_CLIENT_ID is not set — falling back to built-in global Google client ID');
     }
-    this.googleClient = new OAuth2Client(googleClientId);
+    this.googleClient = new OAuth2Client(this.googleClientId);
   }
 
   async discover(email: string) {
@@ -177,11 +184,25 @@ export class AuthService {
     try {
       const ticket = await this.googleClient.verifyIdToken({
         idToken,
-        audience: this.configService.get<string>('GOOGLE_CLIENT_ID'),
+        audience: this.googleClientId,
       });
       payload = ticket.getPayload();
     } catch (e) {
-      this.logger.warn(`[${requestId}] Google login: token verification failed`);
+      // Decode (not verify) the token payload purely for diagnostics so a
+      // client-ID mismatch is visible in logs instead of a generic 401.
+      let debugAud = 'unparseable';
+      let debugEmail = 'unparseable';
+      try {
+        const parts = idToken.split('.');
+        if (parts.length === 3 && parts[1]) {
+          const decoded = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { aud?: unknown; email?: unknown };
+          debugAud = String(decoded.aud ?? 'missing');
+          debugEmail = String(decoded.email ?? 'missing');
+        }
+      } catch {}
+      this.logger.warn(
+        `[${requestId}] Google login: token verification failed (expected aud=${this.googleClientId} token aud=${debugAud} email=${debugEmail})`,
+      );
       throw new UnauthorizedException('Invalid Google token');
     }
 
