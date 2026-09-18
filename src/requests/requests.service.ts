@@ -129,15 +129,19 @@ export class RequestsService {
   }
 
   async getStats(user: AuthUser) {
-    const [total, pending, inProgress, completed, rejected, cancelled] = await Promise.all([
+    const [total, pending, inProgress, completed, rejected, cancelled, claimedActive] = await Promise.all([
       this.prisma.request.count({ where: { employeeId: user.sub } }),
       this.prisma.request.count({ where: { employeeId: user.sub, status: 'PENDING' } }),
       this.prisma.request.count({ where: { employeeId: user.sub, status: 'IN_PROGRESS' } }),
       this.prisma.request.count({ where: { employeeId: user.sub, status: 'COMPLETED' } }),
       this.prisma.request.count({ where: { employeeId: user.sub, status: 'REJECTED' } }),
       this.prisma.request.count({ where: { employeeId: user.sub, status: 'CANCELLED' } }),
+      // Agent-side counter: requests I claimed that are still being worked.
+      // Requester-side counters above are keyed on employeeId and never move
+      // on claim — this is the number that answers "what's on my plate".
+      this.prisma.request.count({ where: { claimedBy: user.sub, status: 'IN_PROGRESS' } }),
     ]);
-    return { total, pending, inProgress, completed, rejected, cancelled };
+    return { total, pending, inProgress, completed, rejected, cancelled, claimedActive };
   }
 
   async createRequest(user: AuthUser, dto: { departmentCode: string; requestTypeCode: string; title: string; description?: string; priority?: string }) {
