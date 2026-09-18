@@ -24,7 +24,10 @@ import { AppController } from './app.controller';
   imports: [
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60_000, limit: 30 }],
+      // Pilot tuning: per-user buckets (tracker keys on the JWT when present),
+      // so 100/min is generous for humans, still hostile to naive floods.
+      // Revisit with login lockouts before large-scale rollout.
+      throttlers: [{ ttl: 60_000, limit: 100 }],
       getTracker: (req: Record<string, unknown>) =>
         ((req['headers'] as Record<string, unknown> | undefined)?.['authorization'] as string) ??
         (req['ip'] as string) ??

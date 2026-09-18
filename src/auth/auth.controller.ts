@@ -90,7 +90,7 @@ export class AuthController {
 
   @Public()
   @Post('discover')
-  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async discover(@Body() dto: DiscoverDto) {
     return this.authService.discover(dto.email);
@@ -98,7 +98,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto, @Req() req: any) {
     const ip = req.ip || req.headers['x-forwarded-for'];
@@ -108,7 +108,7 @@ export class AuthController {
 
   @Public()
   @Post('google')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async googleLogin(@Body() dto: GoogleLoginDto, @Req() req: any) {
     const ip = req.ip || req.headers['x-forwarded-for'];
@@ -118,7 +118,7 @@ export class AuthController {
 
   @Public()
   @Post('accept-invite')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async acceptInvite(@Body() dto: AcceptInviteDto, @Req() req: any) {
     const ip = req.ip || req.headers['x-forwarded-for'];
