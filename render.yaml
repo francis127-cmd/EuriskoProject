@@ -9,8 +9,10 @@ services:
         fromDatabase:
           name: internal-ops-db
           property: connectionString
+      # Stable across deploys: value lives in the Render dashboard (set once,
+      # never auto-regenerated, otherwise every deploy logs out all users).
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: MINIO_ENDPOINT
         sync: false
       - key: MINIO_PORT
