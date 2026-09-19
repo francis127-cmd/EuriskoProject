@@ -16,6 +16,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { DomainsModule } from './domains/domains.module';
 import { ScimModule } from './scim/scim.module';
 import { LegalModule } from './legal/legal.module';
+import { VoiceModule } from './voice/voice.module';
 import { InfraExceptionFilter } from './common/infra-exception.filter';
 import { TenantMiddleware } from './tenant.middleware';
 import { AppController } from './app.controller';
@@ -45,6 +46,7 @@ import { AppController } from './app.controller';
     DomainsModule,
     ScimModule,
     LegalModule,
+    VoiceModule,
   ],
   controllers: [AppController],
   providers: [
